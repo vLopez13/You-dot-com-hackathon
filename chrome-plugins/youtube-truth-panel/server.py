@@ -14,6 +14,7 @@ Usage:
 
 Endpoints:
     GET  /health         -> {"ok": true, "has_key": bool}
+    GET  /api/balance    -> remaining You.com credits + calls made this run
     POST /api/factcheck  -> {claim, mode, context} -> verdict + sources
     POST /api/extract    -> {transcript, title, limit} -> check-worthy claims
 """
@@ -60,8 +61,8 @@ API_KEY = os.environ.get("YDC_API_KEY", "").strip()
 PORT = int(os.environ.get("PORT", "8765"))
 
 RESEARCH_URL = "https://api.you.com/v1/research"
-SEARCH_URL = "https://ydc-index.io/v1/search"
 MCP_URL = "https://api.you.com/mcp"
+BALANCE_URL = "https://api.you.com/v1/billing/account_balance"
 
 # api.you.com sits behind Cloudflare, which 403s the default Python-urllib
 # User-Agent (error 1010). Present a normal browser UA on every outbound call.
@@ -74,18 +75,21 @@ FACTCHECK_PROMPT = (
     "You are a fact checker for claims spoken in an online video. Fact-check "
     "the statement below. It comes from an auto-generated transcript, so it may "
     "be missing punctuation or contain small transcription errors — judge the "
-    "substance, not the wording.\n\n"
-    "TRUST HIERARCHY (SoT):\n"
-    "Level 0: .edu/.gov/.int, peer-reviewed science, WHO/CDC/NIH — highest.\n"
-    "Level 1: wire services & major news (Reuters, AP, BBC, WSJ).\n"
-    "Level 2: niche/tech/business media.\n"
-    "Level 3/4: social, blogs, tabloids — do not weight highly.\n"
-    "Prefer Level 0/1 sources; if they refute the claim, they override lower levels.\n\n"
-    "Your response MUST begin with exactly one line of the form 'VERDICT: X' "
-    "where X is one of TRUE, FALSE, MISLEADING, or UNVERIFIED. On the next line "
-    "give one concise sentence (max 35 words) explaining the verdict. Cite "
-    "concrete facts (stats, dates, named findings). Use UNVERIFIED when the "
-    "statement is opinion, prediction, or not checkable.\n"
+    "substance, not the wording. Base the verdict only on reliable, trustworthy, "
+    "widely cited sources (.gov, .edu, major news wires, scientific orgs). Ignore "
+    "memes, GIFs, social posts, blogs, tabloids, and tangential or unrelated pages. "
+    "Use UNVERIFIED when the statement is opinion, prediction, or not checkable.\n\n"
+    "Answer in exactly two lines and nothing else:\n"
+    "Line 1: 'VERDICT: X' where X is one of TRUE, FALSE, MISLEADING, UNVERIFIED.\n"
+    "Line 2: one plain-English sentence of at most 30 words explaining why.\n\n"
+    "Formatting rules for line 2, follow them strictly:\n"
+    "- Plain prose only. No markdown, no headings, no '#' characters, no bullet "
+    "points, no bold or italics, no quotes around the sentence.\n"
+    "- No citation markers of any kind, such as [1] or [[1, 2, 3]].\n"
+    "- Do NOT list, name, link or describe your sources — they are displayed "
+    "separately. Never write a 'Sources' section.\n"
+    "- Lead with the substance (the correct fact or figure), not with phrases "
+    "like 'The claim is' or 'According to sources'.\n\n"
     "{context}"
     'Statement: "{claim}"'
 )
@@ -101,6 +105,8 @@ EXTRACT_PROMPT = (
 
 _cache = {}
 _cache_lock = threading.Lock()
+# Calls actually billed this run, so the panel can show spend alongside balance.
+_usage = {"calls": 0, "cached": 0}
 
 LEVEL0_DOMAINS = (
     "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov", "jstor.org", "arxiv.org",
@@ -120,6 +126,20 @@ LEVEL3_DOMAINS = (
 LEVEL4_DOMAINS = (
     "dailymail.co.uk", "thesun.co.uk", "nationalenquirer.com",
     "naturalnews.com", "infowars.com",
+)
+
+# Never surface these as citations — memes, GIFs, social junk, clickbait.
+BLOCKED_DOMAINS = (
+    "giphy.com", "tenor.com", "imgur.com", "gfycat.com", "reddit.com",
+    "knowyourmeme.com", "memedroid.com", "9gag.com", "buzzfeed.com",
+    "boredpanda.com", "tumblr.com", "pinterest.com", "tiktok.com",
+    "instagram.com", "facebook.com", "twitter.com", "x.com", "youtube.com",
+    "youtu.be", "medium.com", "quora.com", "substack.com", "patreon.com",
+)
+_BLOCKED_URL = re.compile(
+    r"(?:^|/)(?:gif|gifs|meme|memes|funny|viral)(?:/|$)|"
+    r"\.(?:gif|webm)(?:\?|$)|giphy|tenor\.com",
+    re.I,
 )
 
 
@@ -195,8 +215,8 @@ def _best_snippet(snippets) -> str:
 
 
 def _process_sources(raw_sources: list) -> list:
-    """Attach SoT levels + snippets; sort Level 0 first; cap at 5."""
-    seen, out = set(), []
+    """Keep only trustworthy sources; drop memes/GIFs/social/low-trust junk."""
+    seen, candidates = set(), []
     for s in raw_sources or []:
         if isinstance(s, str):
             url, title, snippet = s, s, ""
@@ -211,9 +231,17 @@ def _process_sources(raw_sources: list) -> list:
                 snippet = s.get("snippet") or ""
         if not url or not url.startswith("http") or url in seen:
             continue
+        host = _host(url)
+        if _matches(host, BLOCKED_DOMAINS) or _matches(host, LEVEL3_DOMAINS) or _matches(host, LEVEL4_DOMAINS):
+            continue
+        if _BLOCKED_URL.search(url) or _BLOCKED_URL.search(title):
+            continue
         seen.add(url)
         cls = _classify_source(url)
-        out.append(
+        # Skip low-trust leftovers that weren't in the blocklists.
+        if cls["level"] >= 3:
+            continue
+        candidates.append(
             {
                 "url": url,
                 "title": title,
@@ -224,8 +252,13 @@ def _process_sources(raw_sources: list) -> list:
                 "trusted": cls["trusted"],
             }
         )
-    out.sort(key=lambda x: (x["level"], 0 if x.get("snippet") else 1))
-    return out[:5]
+
+    candidates.sort(key=lambda x: (x["level"], 0 if x.get("snippet") else 1))
+    # Prefer Level 0–1; only fill with Level 2 media if we lack high-trust hits.
+    top = [c for c in candidates if c["level"] <= 1]
+    if len(top) < 2:
+        top = top + [c for c in candidates if c["level"] == 2]
+    return top[:5]
 
 # --------------------------------------------------------------- You.com calls
 
@@ -321,33 +354,20 @@ def call_mcp(claim: str, context: str = "") -> dict:
     }
 
 
-def call_search(claim: str, context: str = "") -> dict:
-    """Fast evidence via the You.com Web Search API (no synthesized verdict)."""
-    qs = urllib.parse.urlencode({"query": claim[:400], "count": 8})
+def call_balance() -> dict:
+    """Remaining API credits — GET /v1/billing/account_balance (cents)."""
     req = urllib.request.Request(
-        f"{SEARCH_URL}?{qs}",
-        headers={"X-API-Key": API_KEY, "User-Agent": USER_AGENT},
+        BALANCE_URL,
+        headers={"X-API-Key": API_KEY, "Accept": "application/json", "User-Agent": USER_AGENT},
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=20) as resp:
         data = json.loads(resp.read().decode("utf-8"))
 
-    # Search API shape: {"results": {"web": [...]}}; fall back to older shapes.
-    block = data.get("results", data)
-    results = block.get("web", []) if isinstance(block, dict) else []
-    if not results:
-        results = data.get("web", []) or []
-
-    sources = _process_sources(results)
-    snippets = [s["snippet"] for s in sources if s.get("snippet")][:2]
-    return {
-        "mode": "search",
-        "verdict": "UNVERIFIED",
-        "explanation": " ".join(snippets)[:280] or "See sources below.",
-        "content": "\n".join(f"- {s}" for s in snippets),
-        "sources": sources,
-        "has_level0": any(s.get("level") == 0 for s in sources),
-    }
+    attrs = ((data.get("data") or {}).get("attributes") or {})
+    cents = attrs.get("balance")
+    usd = round(cents / 100.0, 2) if isinstance(cents, (int, float)) else None
+    return {"balance_cents": cents, "balance_usd": usd}
 
 
 def extract_claims(transcript: str, title: str, limit: int) -> list:
@@ -374,6 +394,58 @@ def extract_claims(transcript: str, title: str, limit: int) -> list:
 # ------------------------------------------------------------------- parsing
 
 
+# Where a research answer stops explaining and starts listing sources.
+_SOURCE_SECTION = re.compile(
+    r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:sources?|references?|citations?|"
+    r"key excerpts?|url)\s*:?\s*(?:\*\*)?\s*$"
+)
+# The first per-source entry, e.g. "### 1. Apollo 11 | The Planetary Society"
+_SOURCE_ENTRY = re.compile(r"(?im)^\s*(?:#{1,6}\s+\d+\.|\*\*URL:\*\*|\*\*Key Excerpts?:\*\*|>\s)")
+
+
+def _clean_explanation(raw: str, limit: int = 300) -> str:
+    """Turn a research answer into one clean, human sentence.
+
+    The Research API answers in markdown with citation markers and a trailing
+    source dump. The panel renders sources itself, so strip all of that and
+    keep only the prose.
+    """
+    text = raw or ""
+
+    # 1. Drop any trailing sources / references / excerpt section.
+    for pattern in (_SOURCE_SECTION, _SOURCE_ENTRY):
+        m = pattern.search(text)
+        if m:
+            text = text[: m.start()]
+
+    # 2. Remove citation markers: [[1, 2, 3]], [1], [1,2], [^3].
+    text = re.sub(r"\s*\[\[[^\]]*\]\]", "", text)
+    text = re.sub(r"\s*\[\^?\d+(?:\s*,\s*\d+)*\]", "", text)
+
+    # 3. Flatten markdown: links to their label, then drop the decoration.
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", text)
+    text = re.sub(r"(?m)^\s*[-*•+]\s+", "", text)
+    text = re.sub(r"(?m)^\s*>\s?", "", text)
+    text = text.replace("**", "").replace("__", "").replace("`", "").replace("*", "")
+    text = " ".join(text.split())
+
+    # 4. Keep it to a couple of sentences, cut on a sentence boundary.
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    out = ""
+    for sentence in sentences[:2]:
+        candidate = (out + " " + sentence).strip()
+        if out and len(candidate) > limit:
+            break
+        out = candidate
+    if not out:
+        out = text
+    if len(out) > limit:
+        trimmed = out[:limit].rsplit(" ", 1)[0]
+        out = trimmed.rstrip(",;:") + "…"
+    return out.strip()
+
+
 def _parse_verdict(content: str):
     """Pull the leading 'VERDICT: X' line out of the model's answer."""
     verdict = "UNVERIFIED"
@@ -393,12 +465,7 @@ def _parse_verdict(content: str):
             rest = content.split(line, 1)[-1].strip()
             explanation = rest or explanation
             break
-    explanation = " ".join(explanation.split())
-    explanation = re.sub(r"\s*\[\d+\]", "", explanation)
-    explanation = explanation.lstrip("*#>_- ").strip()
-    if len(explanation) > 400:
-        explanation = explanation[:397] + "..."
-    return verdict, explanation
+    return verdict, _clean_explanation(explanation)
 
 
 def _parse_jsonrpc(raw: str) -> dict:
@@ -500,6 +567,19 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/health":
             return self._send_json(200, {"ok": True, "has_key": bool(API_KEY)})
+        if path == "/api/balance":
+            if not API_KEY:
+                return self._send_json(500, {"error": "YDC_API_KEY is not set on the server."})
+            try:
+                result = call_balance()
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode("utf-8", "replace")[:300]
+                return self._send_json(502, {"error": f"balance API error {e.code}", "detail": detail})
+            except Exception as e:  # noqa: BLE001
+                return self._send_json(502, {"error": str(e)})
+            with _cache_lock:
+                result["session"] = dict(_usage)
+            return self._send_json(200, result)
         return self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -537,14 +617,17 @@ class Handler(BaseHTTPRequestHandler):
         with _cache_lock:
             hit = _cache.get(key)
         if hit:
+            with _cache_lock:
+                _usage["cached"] += 1
             return self._send_json(200, dict(hit, cached=True))
 
         context = _context_line(payload.get("context"))
-        dispatch = {"search": call_search, "mcp": call_mcp, "research": call_research}
+        dispatch = {"mcp": call_mcp, "research": call_research}
         result = dispatch.get(mode, call_research)(claim, context)
         result["claim"] = claim
         with _cache_lock:
             _cache[key] = result
+            _usage["calls"] += 1
         return self._send_json(200, result)
 
     def _extract(self, payload):
@@ -553,6 +636,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(400, {"error": "missing 'transcript'"})
         limit = max(1, min(int(payload.get("limit") or 8), 20))
         claims = extract_claims(transcript, payload.get("title") or "", limit)
+        with _cache_lock:
+            _usage["calls"] += 1
         return self._send_json(200, {"claims": claims})
 
     def log_message(self, fmt, *args):

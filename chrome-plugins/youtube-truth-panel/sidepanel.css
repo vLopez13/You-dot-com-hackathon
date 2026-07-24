@@ -39,6 +39,10 @@ header {
   padding: 4px 9px; border-radius: 999px; font-size: 11px;
   background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
 }
+.pill.credits { cursor: pointer; font-variant-numeric: tabular-nums; }
+.pill.credits:hover { border-color: var(--accent); color: var(--text); }
+.pill.credits.low { color: var(--misleading); border-color: rgba(255,176,46,.4); }
+.pill.credits.empty { color: var(--false); border-color: rgba(255,77,94,.45); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--unverified); flex: none; }
 .dot.ok { background: var(--true); }
 .dot.bad { background: var(--false); }
@@ -84,6 +88,7 @@ body.live-mode .line.future { display: none; }
 .btn:hover:not(:disabled) { border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.live { background: var(--false); border-color: var(--false); color: #fff; }
+.btn.on { background: rgba(108,140,255,.16); border-color: var(--accent); color: var(--accent); }
 .btn.ghost { color: var(--muted); }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 

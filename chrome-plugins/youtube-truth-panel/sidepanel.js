@@ -11,7 +11,8 @@ const DEFAULTS = {
   endpoint: 'http://127.0.0.1:8765',
   mode: 'research',
   maxClaims: 8,
-  smartExtract: false
+  smartExtract: false,
+  autoCheck: false
 };
 
 const state = {
@@ -48,12 +49,21 @@ const state = {
 async function loadSettings() {
   const stored = await chrome.storage.local.get(DEFAULTS);
   state.settings = { ...DEFAULTS, ...stored };
+  // 'search' (Fast) was removed — anyone still on it lands on the REST verdict.
+  if (state.settings.mode === 'search') saveSettings({ mode: 'research' });
   $('endpoint').value = state.settings.endpoint;
   $('maxClaims').value = String(state.settings.maxClaims);
   $('smartExtract').checked = !!state.settings.smartExtract;
   [...$('modeToggle').children].forEach((b) =>
     b.classList.toggle('active', b.dataset.mode === state.settings.mode)
   );
+  setAutoButton();
+}
+
+function setAutoButton() {
+  const on = !!state.settings.autoCheck;
+  $('autoBtn').classList.toggle('on', on);
+  $('autoBtn').textContent = on ? '⚡ Auto on' : '⚡ Auto';
 }
 
 function saveSettings(patch) {
@@ -84,6 +94,39 @@ async function checkBackend() {
 function setBackend(kind, text) {
   $('backendDot').className = 'dot ' + kind;
   $('backendText').textContent = text;
+}
+
+/** Remaining You.com credits, straight from the billing API. */
+async function refreshBalance() {
+  const pill = $('creditsPill');
+  const label = $('creditsText');
+  try {
+    const res = await fetch(api('/api/balance'), { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `unavailable (${res.status})`);
+
+    const usd = data.balance_usd;
+    const known = typeof usd === 'number';
+    label.textContent = known ? `$${usd.toFixed(2)} left` : 'credits ?';
+    pill.classList.toggle('low', known && usd > 0 && usd < 5);
+    pill.classList.toggle('empty', known && usd <= 0);
+    const s = data.session || {};
+    pill.title =
+      `You.com credits remaining\n` +
+      `${s.calls || 0} billed call(s) this backend run, ${s.cached || 0} served from cache\n` +
+      `Click to refresh`;
+  } catch (e) {
+    label.textContent = 'credits —';
+    pill.classList.remove('low', 'empty');
+    pill.title = `Could not read balance: ${e.message || e}`;
+  }
+}
+
+let balanceTimer = null;
+/** Coalesce refreshes so a burst of checks costs one balance call. */
+function scheduleBalanceRefresh() {
+  clearTimeout(balanceTimer);
+  balanceTimer = setTimeout(refreshBalance, 4000);
 }
 
 // ---------------------------------------------------------------- tab wiring
@@ -143,6 +186,7 @@ async function syncVideo({ force = false } = {}) {
   state.channel = ctx.channel || '';
 
   if (changed || force) {
+    stopScan(); // don't let a scan of the previous video keep writing cards
     stopLive();
     resetAll();
     setVideoHeader(state.title, state.channel, 'loading captions…');
@@ -198,11 +242,7 @@ async function loadTranscript() {
     updateNow(state.lastTime);
     applyLiveWindow(state.lastTime);
 
-    const label =
-      result.source === 'metadata'
-        ? 'no captions — using title + description'
-        : `${state.lines.length} lines · ${state.claims.length} claims` + (result.auto ? ' · auto-captions' : '');
-    setVideoHeader(state.title, state.channel, label);
+    setVideoHeader(state.title, state.channel, transcriptLabel());
     // Keep the strategy trail on the status line for troubleshooting.
     $('transcriptState').title = [`strategy: ${result.strategy || result.source}`]
       .concat(result.notes || [])
@@ -210,6 +250,12 @@ async function loadTranscript() {
 
     // Follow playback so the transcript highlights along with the video.
     sendToTab({ type: 'start-time-updates' }).catch(() => {});
+
+    // Auto mode fact-checks a new video without being asked. Live follow does
+    // its own checking as claims are spoken, so don't double up.
+    if (state.settings.autoCheck && !state.live && state.claims.length && !state.scanning) {
+      scanVideo();
+    }
     return result;
   } catch (e) {
     setVideoHeader(state.title, state.channel, 'could not read captions');
@@ -218,6 +264,16 @@ async function loadTranscript() {
   } finally {
     state.loadingTranscript = false;
   }
+}
+
+/** The steady-state status line under the video title. */
+function transcriptLabel() {
+  const t = state.transcript;
+  if (!t) return 'no captions';
+  if (t.source === 'metadata') return 'no captions — using title + description';
+  return (
+    `${state.lines.length} lines · ${state.claims.length} claims` + (t.auto ? ' · auto-captions' : '')
+  );
 }
 
 /** Merge caption fragments into readable, seekable transcript lines. */
@@ -451,18 +507,25 @@ async function smartClaims(limit) {
 
 // ---------------------------------------------------------------- scanning
 
+/** How many claims a scan checks — Auto means every one of them. */
+function claimLimit() {
+  if (state.settings.autoCheck) return Infinity;
+  const v = state.settings.maxClaims;
+  return String(v).toLowerCase() === 'all' ? Infinity : Number(v) || 8;
+}
+
 async function scanVideo() {
   if (state.scanning) return stopScan();
 
   const transcript = state.transcript || (await loadTranscript());
   if (!transcript) return;
 
-  const limit = Number(state.settings.maxClaims) || 8;
+  const limit = claimLimit();
   let picks = [];
   if (state.settings.smartExtract) {
     setVideoHeader(state.title, state.channel, 'asking You.com to pick claims…');
     try {
-      picks = await smartClaims(limit);
+      picks = await smartClaims(Number.isFinite(limit) ? limit : 20); // backend caps at 20
       picks.forEach((c) => state.claimById.set(c.id, c));
     } catch (_) {
       picks = [];
@@ -490,11 +553,13 @@ async function scanVideo() {
   const tick = () => {
     done++;
     $('progressFill').style.width = `${Math.round((done / total) * 100)}%`;
+    setVideoHeader(state.title, state.channel, `checking ${done}/${total} claims…`);
   };
+  setVideoHeader(state.title, state.channel, `checking 0/${total} claims…`);
 
   picks.forEach((claim) => setCardStatus(addCard(claim), 'QUEUED'));
 
-  const concurrency = state.settings.mode === 'search' ? 4 : 2;
+  const concurrency = 2;
   const queue = picks.slice();
   const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
     while (queue.length && state.scanning) {
@@ -522,6 +587,7 @@ function stopScan() {
   $('scanBtn').classList.add('primary');
   $('progress').hidden = true;
   $('progressFill').style.width = '0';
+  if (state.transcript) setVideoHeader(state.title, state.channel, transcriptLabel());
 }
 
 // ---------------------------------------------------------------- live follow
@@ -621,10 +687,13 @@ function onTimeUpdate(time) {
   highlightLine(time);
   if (!state.live) return;
   applyLiveWindow(time);
+  // Auto mode checks everything that goes by; otherwise only the strong claims.
+  const auto = state.settings.autoCheck;
+  const minScore = auto ? 1 : 3;
   const due = state.claims.filter(
-    (c) => !state.queued.has(c.id) && c.score >= 3 && c.start <= time && c.start >= time - LIVE_WINDOW
+    (c) => !state.queued.has(c.id) && c.score >= minScore && c.start <= time && c.start >= time - LIVE_WINDOW
   );
-  for (const claim of due.slice(0, 2)) checkClaim(claim);
+  for (const claim of due.slice(0, auto ? 3 : 2)) checkClaim(claim);
 }
 
 // ---------------------------------------------------------------- fact check
@@ -772,8 +841,12 @@ function renderResult(card, claim, data) {
     line.title = `${verdict} — ${data.explanation || ''}`;
   }
 
-  const tag =
-    data.mode === 'search' ? 'web evidence' : data.mode === 'mcp' ? 'via MCP · grounded' : 'grounded verdict';
+  const tag = data.cached
+    ? 'cached'
+    : data.mode === 'mcp'
+      ? 'via MCP · grounded'
+      : 'grounded verdict';
+  if (!data.cached) scheduleBalanceRefresh();
 
   card.innerHTML = `
     <div class="card-top">
@@ -951,6 +1024,11 @@ function showTab(name) {
 
 $('scanBtn').addEventListener('click', () => scanVideo());
 $('liveBtn').addEventListener('click', () => toggleLive());
+$('autoBtn').addEventListener('click', () => {
+  saveSettings({ autoCheck: !state.settings.autoCheck });
+  setAutoButton();
+  if (state.settings.autoCheck && state.transcript && !state.scanning && !state.live) scanVideo();
+});
 $('clearBtn').addEventListener('click', () => {
   stopScan();
   resetResults();
@@ -983,14 +1061,16 @@ $('modeToggle').addEventListener('click', (e) => {
   [...$('modeToggle').children].forEach((c) => c.classList.toggle('active', c === b));
 });
 
-$('maxClaims').addEventListener('change', (e) => saveSettings({ maxClaims: Number(e.target.value) }));
+$('maxClaims').addEventListener('change', (e) => saveSettings({ maxClaims: e.target.value }));
 $('smartExtract').addEventListener('change', (e) => saveSettings({ smartExtract: e.target.checked }));
 $('endpoint').addEventListener('change', (e) => {
   saveSettings({ endpoint: e.target.value.trim() || DEFAULTS.endpoint });
   $('endpoint').value = state.settings.endpoint;
   checkBackend();
+  refreshBalance();
 });
 $('backendPill').addEventListener('click', () => checkBackend());
+$('creditsPill').addEventListener('click', () => refreshBalance());
 
 chrome.runtime.onMessage.addListener((message) => {
   if (!message) return;
@@ -1005,5 +1085,6 @@ chrome.tabs.onActivated.addListener(() => syncVideo());
 (async function init() {
   await loadSettings();
   await checkBackend();
+  refreshBalance();
   await syncVideo({ force: true });
 })();

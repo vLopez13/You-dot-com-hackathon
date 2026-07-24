@@ -59,6 +59,12 @@ fact-checking happens — across two tabs:
 |--------|-----------|
 | **Scan video** | Ranks every claim in the transcript and fact-checks the top N (5–20, your pick) in parallel. Good for a video you haven't watched yet. |
 | **Live follow** | Turns the panel into a live feed: claims and transcript lines past the playhead are hidden, and each claim is revealed *and* fact-checked as the video reaches it. Leave it running while you watch. |
+| **⚡ Auto** | Sticky toggle: every video you open is checked automatically as soon as its captions load, with no click — and it checks **every** detected claim, ignoring the claim limit. Off by default, since it spends credits without asking. |
+
+**Scan checks the top N claims by score, not all of them** — that is what the
+claim dropdown controls (5/8/12/20/**All**). If a scan seems to skip claims,
+either raise that to **All** or turn on **⚡ Auto**, which always checks
+everything. During a scan the status line counts `checking 7/23 claims…`.
 
 Live follow only reveals what has actually been said — it is a running feed
 rather than the whole video at once. Turning it off puts everything back on
@@ -68,19 +74,38 @@ Click any timestamp — on a card or a transcript line — to seek the video the
 The **trust score** is the share of decided verdicts that held up (`MISLEADING`
 counts as a partial credit; `UNVERIFIED` is excluded).
 
+## Credits
+
+The header pill shows the credits left on your You.com account, read straight
+from `GET https://api.you.com/v1/billing/account_balance` (the API reports
+cents; the panel shows dollars). It refreshes on open, a few seconds after a
+batch of checks settles, and whenever you click it. Its tooltip adds how many
+calls this backend run actually billed versus how many were served from cache.
+It turns amber below $5 and red at zero.
+
 ## Depth modes
 
-The same three You.com integrations as LiveCheck, switchable in the panel:
+Two You.com integrations, switchable in the panel:
 
 - **REST** → `POST https://api.you.com/v1/research` — grounded, cited verdict.
   The backend prompts it to lead with `VERDICT: TRUE|FALSE|MISLEADING|UNVERIFIED`,
   which becomes the badge.
 - **MCP** → `POST https://api.you.com/mcp` (JSON-RPC) calling the `you-research`
   tool. Same engine over the Model Context Protocol, `Authorization: Bearer` auth.
-- **Fast** → `GET https://ydc-index.io/v1/search` — quick web evidence, no
-  synthesized verdict. Use it when latency matters more than a hard verdict.
 
-Repeated claims are cached in the backend, so re-scanning a video is free.
+Repeated claims are cached in the backend, so re-scanning a video is free —
+cached cards are tagged `cached` and cost nothing. The cache lives in memory,
+so restarting the backend clears it.
+
+### Keeping the explanation readable
+
+The Research API answers in markdown: citation markers like `[[1, 2, 3]]`, a
+`## Sources` section and `**Key Excerpts:**` blocks. None of that belongs in a
+one-line verdict, so the prompt forbids it *and* `_clean_explanation()` strips
+it anyway — cutting everything from the first sources heading, removing
+citation markers, flattening links to their label, dropping heading/bullet/bold
+syntax and trimming to at most two sentences on a sentence boundary. Sources
+are rendered separately as links, so nothing is lost.
 
 ## How claims are found
 
@@ -143,10 +168,22 @@ the same trail is on the status line's tooltip.
 
 ```
 GET  /health        -> {"ok": true, "has_key": true}
+GET  /api/balance   -> {balance_cents, balance_usd, session:{calls, cached}}
 POST /api/factcheck  {claim, mode, context:{title, channel}}
                     -> {verdict, explanation, sources[], mode, cached?}
 POST /api/extract    {transcript, title, limit} -> {claims:[{claim, start}]}
 ```
+
+## Troubleshooting
+
+- **Credits pill shows `credits —` or nothing changes after editing
+  `server.py`** — restart the backend. Python does not hot-reload, so a server
+  started before an endpoint existed keeps answering `{"error": "not found"}`
+  no matter how many times you reload the extension. `Ctrl+C`, then re-run it.
+  Check with `curl http://127.0.0.1:8765/api/balance`.
+- **Reloading the extension is not enough for content-script changes** — reload
+  the YouTube tab too; the old script stays in the page until you do.
+- **A scan appears to skip claims** — that is the top-N limit, see above.
 
 ## Notes & limits
 

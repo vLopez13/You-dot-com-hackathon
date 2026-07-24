@@ -10,6 +10,9 @@
     <header>
       <div class="logo">Truth<span>Panel</span></div>
       <div class="spacer"></div>
+      <div class="pill credits" id="creditsPill" title="You.com credits remaining — click to refresh">
+        <span id="creditsText">—</span>
+      </div>
       <div class="pill" id="backendPill" title="Backend status">
         <span class="dot" id="backendDot"></span><span id="backendText">checking…</span>
       </div>
@@ -32,6 +35,7 @@
     <section class="controls">
       <button class="btn primary" id="scanBtn" disabled>Scan video</button>
       <button class="btn" id="liveBtn" disabled>▶ Live follow</button>
+      <button class="btn" id="autoBtn" title="Check every detected claim automatically as soon as a video's captions load — ignores the claim limit and spends credits without asking">⚡ Auto</button>
       <button class="btn ghost" id="clearBtn" title="Clear results">Clear</button>
     </section>
 
@@ -40,15 +44,15 @@
       <div class="mode-toggle" id="modeToggle">
         <button data-mode="research" class="active" title="You.com Research API — grounded verdict + citations">REST</button>
         <button data-mode="mcp" title="You.com MCP server — same engine over Model Context Protocol">MCP</button>
-        <button data-mode="search" title="You.com Search API — fast evidence, no synthesized verdict">Fast</button>
       </div>
       <div class="spacer"></div>
       <span class="hint">Claims</span>
-      <select id="maxClaims" title="How many claims to check in a full scan">
-        <option>5</option>
-        <option selected>8</option>
-        <option>12</option>
-        <option>20</option>
+      <select id="maxClaims" title="How many claims a scan checks (Auto always checks every one)">
+        <option value="5">5</option>
+        <option value="8" selected>8</option>
+        <option value="12">12</option>
+        <option value="20">20</option>
+        <option value="all">All</option>
       </select>
     </section>
 
