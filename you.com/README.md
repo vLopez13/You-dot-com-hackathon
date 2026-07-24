@@ -80,3 +80,7 @@ podcaster’s voice from the stream and checks claims against the **You.com** in
 - **Chrome/Edge only** for speech recognition. Requires an internet connection.
 - Research mode is higher quality but slower; switch to **Fast** for a snappier demo.
 - No camera? The UI still works — the stage just shows a gradient.
+
+## Chrome extension
+
+See [`chrome-plugins/youtube-truth-panel`](chrome-plugins/youtube-truth-panel/) for the YouTube side-panel fact checker (captions → You.com + SoT levels).

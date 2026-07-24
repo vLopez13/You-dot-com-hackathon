@@ -790,17 +790,37 @@ function renderResult(card, claim, data) {
   card.querySelector('.stamp').addEventListener('click', () => seekTo(claim.start));
 
   const sources = card.querySelector('.sources');
+  if (data.has_level0) {
+    const badge = document.createElement('div');
+    badge.className = 'top-trust-badge';
+    badge.textContent = 'Level 0 authority citation (.edu / .gov / science)';
+    sources.appendChild(badge);
+  }
   (data.sources || [])
     .filter((s) => s && s.url)
     .slice(0, 5)
     .forEach((s) => {
+      const level = s.level !== undefined && s.level !== null ? s.level : 2;
+      const wrap = document.createElement('div');
+      wrap.className = `source-item level-${level}`;
+      const pill = document.createElement('span');
+      pill.className = `source-pill level-${level}`;
+      pill.textContent = s.badge || `L${level}`;
       const a = document.createElement('a');
       a.href = s.url;
       a.target = '_blank';
       a.rel = 'noopener';
-      a.textContent = '↗ ' + (s.title || s.url);
+      a.textContent = s.title || s.url;
       a.title = s.url;
-      sources.appendChild(a);
+      wrap.appendChild(pill);
+      wrap.appendChild(a);
+      if (s.snippet) {
+        const fact = document.createElement('div');
+        fact.className = 'source-fact';
+        fact.textContent = s.snippet;
+        wrap.appendChild(fact);
+      }
+      sources.appendChild(wrap);
     });
 }
 

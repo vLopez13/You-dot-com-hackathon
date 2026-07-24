@@ -28,6 +28,34 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_env():
+    """Load API key from local .env or the sibling you.com/.env."""
+    candidates = (
+        os.path.join(HERE, ".env"),
+        os.path.join(HERE, "..", "..", "you.com", ".env"),
+    )
+    for env_path in candidates:
+        if not os.path.exists(env_path):
+            continue
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, val = line.split("=", 1)
+                    key, val = key.strip(), val.strip().strip("'\"")
+                    if key and key not in os.environ:
+                        os.environ[key] = val
+        except OSError as e:
+            sys.stderr.write(f"  Warning: could not read {env_path}: {e}\n")
+        break
+
+
+_load_env()
 API_KEY = os.environ.get("YDC_API_KEY", "").strip()
 PORT = int(os.environ.get("PORT", "8765"))
 
@@ -46,11 +74,18 @@ FACTCHECK_PROMPT = (
     "You are a fact checker for claims spoken in an online video. Fact-check "
     "the statement below. It comes from an auto-generated transcript, so it may "
     "be missing punctuation or contain small transcription errors — judge the "
-    "substance, not the wording. Your response MUST begin with exactly one line "
-    "of the form 'VERDICT: X' where X is one of TRUE, FALSE, MISLEADING, or "
-    "UNVERIFIED. On the next line give one concise sentence (max 35 words) "
-    "explaining the verdict. Base the verdict only on reliable sources. Use "
-    "UNVERIFIED when the statement is opinion, prediction, or not checkable.\n"
+    "substance, not the wording.\n\n"
+    "TRUST HIERARCHY (SoT):\n"
+    "Level 0: .edu/.gov/.int, peer-reviewed science, WHO/CDC/NIH — highest.\n"
+    "Level 1: wire services & major news (Reuters, AP, BBC, WSJ).\n"
+    "Level 2: niche/tech/business media.\n"
+    "Level 3/4: social, blogs, tabloids — do not weight highly.\n"
+    "Prefer Level 0/1 sources; if they refute the claim, they override lower levels.\n\n"
+    "Your response MUST begin with exactly one line of the form 'VERDICT: X' "
+    "where X is one of TRUE, FALSE, MISLEADING, or UNVERIFIED. On the next line "
+    "give one concise sentence (max 35 words) explaining the verdict. Cite "
+    "concrete facts (stats, dates, named findings). Use UNVERIFIED when the "
+    "statement is opinion, prediction, or not checkable.\n"
     "{context}"
     'Statement: "{claim}"'
 )
@@ -67,6 +102,130 @@ EXTRACT_PROMPT = (
 _cache = {}
 _cache_lock = threading.Lock()
 
+LEVEL0_DOMAINS = (
+    "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov", "jstor.org", "arxiv.org",
+    "ieee.org", "nature.com", "science.org", "who.int", "cdc.gov", "nasa.gov",
+    "nih.gov", "noaa.gov", "fda.gov", "epa.gov",
+)
+LEVEL1_DOMAINS = (
+    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "wsj.com",
+    "bloomberg.com", "ft.com", "economist.com", "npr.org", "pbs.org",
+    "nytimes.com", "washingtonpost.com", "theguardian.com", "pewresearch.org",
+    "factcheck.org", "politifact.com", "snopes.com",
+)
+LEVEL3_DOMAINS = (
+    "reddit.com", "medium.com", "twitter.com", "x.com", "substack.com",
+    "quora.com", "tiktok.com", "youtube.com", "facebook.com", "instagram.com",
+)
+LEVEL4_DOMAINS = (
+    "dailymail.co.uk", "thesun.co.uk", "nationalenquirer.com",
+    "naturalnews.com", "infowars.com",
+)
+
+
+def _host(url: str) -> str:
+    try:
+        h = urllib.parse.urlparse(url).hostname or ""
+    except ValueError:
+        return ""
+    return h.lower().removeprefix("www.")
+
+
+def _matches(host: str, domains) -> bool:
+    return any(host == d or host.endswith("." + d) or d in host for d in domains)
+
+
+def _classify_source(url: str) -> dict:
+    """SoT Level 0–4 trust classification (shared with LiveCheck)."""
+    host = _host(url)
+    path = ""
+    try:
+        path = (urllib.parse.urlparse(url).path or "").lower()
+    except ValueError:
+        pass
+    is_file = any(path.endswith(ext) for ext in (".pdf", ".doc", ".docx", ".csv", ".xls", ".xlsx"))
+    is_edu = host.endswith(".edu") or ".edu." in host
+    is_gov = host.endswith(".gov") or ".gov." in host or host.endswith(".mil")
+    is_int = host.endswith(".int")
+
+    if is_edu or is_gov or is_int or is_file or _matches(host, LEVEL0_DOMAINS):
+        if is_file:
+            badge, label = "L0 · File", "Level 0: Primary File"
+        elif is_edu:
+            badge, label = "L0 · .edu", "Level 0: .edu Academic"
+        elif is_gov:
+            badge, label = "L0 · .gov", "Level 0: .gov Institutional"
+        elif is_int:
+            badge, label = "L0 · .int", "Level 0: International Org"
+        else:
+            badge, label = "L0 · Science", "Level 0: Academic & Scientific"
+        return {"level": 0, "badge": badge, "label": label, "trusted": True}
+
+    if _matches(host, LEVEL1_DOMAINS):
+        return {"level": 1, "badge": "L1 · Wire / News", "label": "Level 1: Major News", "trusted": True}
+    if _matches(host, LEVEL4_DOMAINS):
+        return {"level": 4, "badge": "L4 · Low Trust", "label": "Level 4: Low Reliability", "trusted": False}
+    if _matches(host, LEVEL3_DOMAINS):
+        return {"level": 3, "badge": "L3 · Social", "label": "Level 3: Social / UGC", "trusted": False}
+    return {"level": 2, "badge": "L2 · Media", "label": "Level 2: Secondary Media", "trusted": False}
+
+
+def _best_snippet(snippets) -> str:
+    if not snippets:
+        return ""
+    if isinstance(snippets, str):
+        snippets = [snippets]
+    texts = [" ".join(str(s).split()).strip() for s in snippets if str(s).strip()]
+    if not texts:
+        return ""
+
+    def score(t: str) -> int:
+        s = 0
+        if re.search(r"\d+(\.\d+)?\s*%", t):
+            s += 3
+        if re.search(r"\d", t):
+            s += 2
+        if len(t) > 40:
+            s += 1
+        return s
+
+    texts.sort(key=score, reverse=True)
+    best = texts[0]
+    return best[:217] + "..." if len(best) > 220 else best
+
+
+def _process_sources(raw_sources: list) -> list:
+    """Attach SoT levels + snippets; sort Level 0 first; cap at 5."""
+    seen, out = set(), []
+    for s in raw_sources or []:
+        if isinstance(s, str):
+            url, title, snippet = s, s, ""
+        else:
+            url = (s.get("url") or "").strip()
+            title = (s.get("title") or "").strip() or url
+            snips = s.get("snippets") or s.get("snippet") or []
+            if not snips and s.get("description"):
+                snips = [s["description"]]
+            snippet = _best_snippet(snips) if not isinstance(snips, str) else _best_snippet([snips])
+            if isinstance(s.get("snippet"), str) and not snippet:
+                snippet = s.get("snippet") or ""
+        if not url or not url.startswith("http") or url in seen:
+            continue
+        seen.add(url)
+        cls = _classify_source(url)
+        out.append(
+            {
+                "url": url,
+                "title": title,
+                "snippet": snippet,
+                "level": cls["level"],
+                "badge": cls["badge"],
+                "label": cls["label"],
+                "trusted": cls["trusted"],
+            }
+        )
+    out.sort(key=lambda x: (x["level"], 0 if x.get("snippet") else 1))
+    return out[:5]
 
 # --------------------------------------------------------------- You.com calls
 
@@ -93,17 +252,15 @@ def call_research(claim: str, context: str = "") -> dict:
     data = _research(FACTCHECK_PROMPT.format(claim=claim, context=context))
     output = data.get("output", {}) or {}
     content = output.get("content", "") or ""
-    sources = output.get("sources", []) or []
+    sources = _process_sources(output.get("sources", []) or [])
     verdict, explanation = _parse_verdict(content)
     return {
         "mode": "research",
         "verdict": verdict,
         "explanation": explanation,
         "content": content,
-        "sources": [
-            {"url": s.get("url", ""), "title": s.get("title", "") or s.get("url", "")}
-            for s in sources[:5]
-        ],
+        "sources": sources,
+        "has_level0": any(s.get("level") == 0 for s in sources),
     }
 
 
@@ -153,18 +310,20 @@ def call_mcp(claim: str, context: str = "") -> dict:
         raise RuntimeError(content or "MCP tool returned an error")
 
     verdict, explanation = _parse_verdict(content)
+    sources = _process_sources(_sources_from_markdown(content))
     return {
         "mode": "mcp",
         "verdict": verdict,
         "explanation": explanation,
         "content": content,
-        "sources": _sources_from_markdown(content),
+        "sources": sources,
+        "has_level0": any(s.get("level") == 0 for s in sources),
     }
 
 
 def call_search(claim: str, context: str = "") -> dict:
     """Fast evidence via the You.com Web Search API (no synthesized verdict)."""
-    qs = urllib.parse.urlencode({"query": claim[:400], "count": 5})
+    qs = urllib.parse.urlencode({"query": claim[:400], "count": 8})
     req = urllib.request.Request(
         f"{SEARCH_URL}?{qs}",
         headers={"X-API-Key": API_KEY, "User-Agent": USER_AGENT},
@@ -179,17 +338,15 @@ def call_search(claim: str, context: str = "") -> dict:
     if not results:
         results = data.get("web", []) or []
 
-    snippets, sources = [], []
-    for r in results[:5]:
-        sources.append({"url": r.get("url", ""), "title": r.get("title", "") or r.get("url", "")})
-        snips = r.get("snippets") or ([r["description"]] if r.get("description") else [])
-        snippets.extend(snips[:1])
+    sources = _process_sources(results)
+    snippets = [s["snippet"] for s in sources if s.get("snippet")][:2]
     return {
         "mode": "search",
         "verdict": "UNVERIFIED",
-        "explanation": " ".join(snippets[:2])[:280] or "See sources below.",
+        "explanation": " ".join(snippets)[:280] or "See sources below.",
         "content": "\n".join(f"- {s}" for s in snippets),
         "sources": sources,
+        "has_level0": any(s.get("level") == 0 for s in sources),
     }
 
 

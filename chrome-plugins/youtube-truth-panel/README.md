@@ -7,7 +7,8 @@ comes back with citations and a timestamp you can click to jump to the moment
 the claim was spoken.
 
 It's the [LiveCheck podcast detector](../../you.com/) idea moved into the
-browser: instead of a microphone, the input is any YouTube video.
+browser: instead of a microphone, the input is any YouTube video. Citations
+use the same **SoT Level 0–4** trust ranking as LiveCheck.
 
 ```
 YouTube tab ──► content.js ──► caption track (timedtext JSON)
