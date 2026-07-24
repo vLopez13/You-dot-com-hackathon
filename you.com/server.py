@@ -24,6 +24,28 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_env():
+    """Load you.com/.env into the process (API key stays out of git)."""
+    env_path = os.path.join(HERE, ".env")
+    if not os.path.exists(env_path):
+        return
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key, val = key.strip(), val.strip().strip("'\"")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except OSError as e:
+        sys.stderr.write(f"  Warning: could not read .env: {e}\n")
+
+
+_load_env()
 API_KEY = os.environ.get("YDC_API_KEY", "").strip()
 PORT = int(os.environ.get("PORT", "8000"))
 
@@ -43,103 +65,66 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
-# Prefer primary / reference outlets over blogs and social noise.
-# Any hostname ending in .edu / .gov / .int is also treated as trusted.
-TRUSTED_TLDS = (".edu", ".gov", ".int", ".mil")
-
-TRUSTED_DOMAINS = [
-    # reference & encyclopedias
-    "wikipedia.org",
-    "britannica.com",
-    "wikidata.org",
-    "nationalgeographic.com",
-    "natgeo.com",
-    # wire services & public broadcasters
-    "reuters.com",
-    "apnews.com",
-    "bbc.com",
-    "bbc.co.uk",
-    "npr.org",
-    "pbs.org",
-    "afp.com",
-    "aljazeera.com",
-    "aljazeera.net",
-    "dw.com",
-    "france24.com",
-    "abcnews.go.com",
-    "cbsnews.com",
-    "nbcnews.com",
-    "cnn.com",
-    # science, health, government (also covered by .gov/.int TLDs)
-    "nih.gov",
-    "cdc.gov",
-    "who.int",
-    "fda.gov",
-    "nasa.gov",
-    "noaa.gov",
-    "census.gov",
-    "data.gov",
-    "epa.gov",
-    "unesco.org",
-    "un.org",
-    "worldbank.org",
-    "imf.org",
-    "oecd.org",
-    "nature.com",
-    "science.org",
-    "scientificamerican.com",
-    "newscientist.com",
-    "pubmed.ncbi.nlm.nih.gov",
-    "ncbi.nlm.nih.gov",
-    "arxiv.org",
-    "mayoclinic.org",
-    "clevelandclinic.org",
-    "harvard.edu",
-    "mit.edu",
-    "stanford.edu",
-    # fact-check desks
-    "factcheck.org",
-    "politifact.com",
-    "snopes.com",
-    "fullfact.org",
-    "factcheck.afp.com",
-    # major newsrooms & business press
-    "nytimes.com",
-    "washingtonpost.com",
-    "theguardian.com",
-    "wsj.com",
-    "economist.com",
-    "bloomberg.com",
-    "forbes.com",
-    "ft.com",
-    "time.com",
-    "theatlantic.com",
-    "usatoday.com",
-    "latimes.com",
-    "independent.co.uk",
+# Domains boosted / excluded via You.com source_control (aligned with SoT L0–L1 vs L3–L4).
+BOOST_DOMAINS = [
+    "wikipedia.org", "britannica.com", "nationalgeographic.com",
+    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "npr.org", "pbs.org",
+    "afp.com", "aljazeera.com", "dw.com", "france24.com",
+    "nih.gov", "cdc.gov", "who.int", "fda.gov", "nasa.gov", "noaa.gov",
+    "census.gov", "data.gov", "epa.gov", "unesco.org", "un.org",
+    "worldbank.org", "imf.org", "oecd.org", "pewresearch.org",
+    "nature.com", "science.org", "scientificamerican.com", "arxiv.org",
+    "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov", "jstor.org", "ieee.org",
+    "mayoclinic.org", "harvard.edu", "mit.edu", "stanford.edu",
+    "factcheck.org", "politifact.com", "snopes.com", "fullfact.org",
+    "nytimes.com", "washingtonpost.com", "theguardian.com", "wsj.com",
+    "economist.com", "bloomberg.com", "ft.com", "forbes.com",
 ]
 
-LOW_QUALITY_DOMAINS = [
-    "reddit.com",
-    "quora.com",
-    "pinterest.com",
-    "tiktok.com",
-    "facebook.com",
-    "twitter.com",
-    "x.com",
-    "instagram.com",
-    "tumblr.com",
-    "medium.com",
-    "answers.yahoo.com",
-    "wikihow.com",
-    "buzzfeed.com",
-    "change.org",
-    "naturalnews.com",
-    "infowars.com",
-    "beforeitsnews.com",
-    "theonion.com",
-    "babylonbee.com",
+EXCLUDE_DOMAINS = [
+    "reddit.com", "quora.com", "pinterest.com", "tiktok.com", "facebook.com",
+    "twitter.com", "x.com", "instagram.com", "tumblr.com", "medium.com",
+    "answers.yahoo.com", "wikihow.com", "buzzfeed.com", "change.org",
+    "naturalnews.com", "infowars.com", "beforeitsnews.com",
+    "dailymail.co.uk", "thesun.co.uk", "nationalenquirer.com",
 ]
+
+# SoT Level 0 institutional / peer-reviewed hosts (plus .edu/.gov/.mil/.int TLDs).
+LEVEL0_DOMAINS = (
+    "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov", "jstor.org", "sciencedirect.com",
+    "arxiv.org", "ieee.org", "nature.com", "science.org", "sciencemag.org",
+    "who.int", "cdc.gov", "nasa.gov", "nih.gov", "noaa.gov", "fda.gov",
+    "epa.gov", "census.gov", "data.gov", "un.org", "unesco.org",
+)
+
+LEVEL1_DOMAINS = (
+    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "wsj.com",
+    "bloomberg.com", "pewresearch.org", "ft.com", "economist.com",
+    "npr.org", "pbs.org", "worldbank.org", "oecd.org", "afp.com",
+    "nytimes.com", "washingtonpost.com", "theguardian.com", "aljazeera.com",
+    "factcheck.org", "politifact.com", "snopes.com", "fullfact.org",
+)
+
+LEVEL2_DOMAINS = (
+    "forbes.com", "techcrunch.com", "wired.com", "theverge.com", "cnbc.com",
+    "scientificamerican.com", "newscientist.com", "time.com", "theatlantic.com",
+    "usatoday.com", "latimes.com", "independent.co.uk", "cnn.com",
+    "nbcnews.com", "cbsnews.com", "abcnews.go.com", "dw.com", "france24.com",
+    "nationalgeographic.com", "britannica.com", "wikipedia.org",
+    "mayoclinic.org", "clevelandclinic.org",
+)
+
+LEVEL3_DOMAINS = (
+    "reddit.com", "medium.com", "twitter.com", "x.com", "substack.com",
+    "linkedin.com", "quora.com", "tiktok.com", "youtube.com", "facebook.com",
+    "instagram.com", "tumblr.com", "pinterest.com", "wikihow.com", "buzzfeed.com",
+)
+
+LEVEL4_DOMAINS = (
+    "dailymail.co.uk", "thesun.co.uk", "nationalenquirer.com",
+    "naturalnews.com", "infowars.com", "beforeitsnews.com",
+    "theonion.com", "babylonbee.com",
+)
 
 OPINION_MARKERS = re.compile(
     r"\b(i think|in my opinion|imo|my experience|rumor|rumour|allegedly|"
@@ -148,33 +133,119 @@ OPINION_MARKERS = re.compile(
     re.I,
 )
 
-# Ask the Research API to lead with a machine-parseable verdict so the UI can
-# render a coloured badge, then cite 2–3 independent real-world sources with
-# concrete factual evidence (numbers, dates, named findings) — not bare links.
+# SoT trust hierarchy + concrete factual citations (best of both branches).
 FACTCHECK_PROMPT = (
     "You are a real-time fact checker for a live podcast. Fact-check the "
-    "following spoken statement.\n"
+    "following spoken statement using live web search evidence.\n\n"
+    "EVALUATION MATRIX & TRUST HIERARCHY (SoT Architecture):\n"
+    "1. Level 0 (HIGHEST): .edu, .gov, .mil, .int, peer-reviewed science "
+    "(PubMed, Nature, ArXiv), WHO/CDC/NIH/NASA, primary document files.\n"
+    "2. Level 1 (HIGH): Wire services & major news (Reuters, AP, BBC, WSJ, "
+    "NPR, Pew, FactCheck.org).\n"
+    "3. Level 2 (MODERATE): Tech/business/niche media (Forbes, Wired, etc.).\n"
+    "4. Level 3/4 (LOW): Social, forums, blogs, tabloids — do not weight highly.\n"
+    "CRITICAL: Level 0/1 evidence overrides lower-level sources when they conflict.\n\n"
     "Your response MUST begin with exactly one line of the form 'VERDICT: X' "
     "where X is one of TRUE, FALSE, MISLEADING, or UNVERIFIED.\n"
     "On the next line give one concise sentence (max 30 words) explaining the "
-    "verdict.\n"
-    "Then cite 2 or 3 independent, reliable primary or reference sources. "
-    "Strongly prefer: .gov / .edu / .int sites, CDC, WHO, NIH, NASA, UNESCO, "
-    "wire services (Reuters, AP, AFP), encyclopedias, peer-reviewed science, "
-    "Al Jazeera, National Geographic, Forbes, Washington Post, and other "
-    "established newsrooms. Prefer those over blogs, forums, or social media.\n"
-    "For each citation, ground it in a concrete fact from that source "
-    "(statistic, date, named finding, official figure, or direct quote) — "
-    "not a vague summary. Include inline citations that map to the sources "
-    "you used. If you cannot find at least two solid sources with factual "
-    "evidence, mark the verdict UNVERIFIED.\n\n"
+    "verdict, noting Level 0 evidence when available.\n"
+    "Then cite 2 or 3 independent sources with concrete facts (statistic, date, "
+    "named finding, or direct quote). Prefer Level 0/1. If you cannot find at "
+    "least two solid factual sources, mark the verdict UNVERIFIED.\n\n"
     'Statement: "{claim}"'
 )
 
 SOURCE_CONTROL = {
-    "boost_domains": TRUSTED_DOMAINS,
-    "exclude_domains": LOW_QUALITY_DOMAINS,
+    "boost_domains": BOOST_DOMAINS,
+    "exclude_domains": EXCLUDE_DOMAINS,
 }
+
+
+def _host_matches(host: str, domains) -> bool:
+    return any(host == d or host.endswith("." + d) or d in host for d in domains)
+
+
+def _classify_source(url: str) -> dict:
+    """Classify a URL with the SoT Level 0–4 trust hierarchy."""
+    try:
+        parsed = urllib.parse.urlparse((url or "").strip())
+    except ValueError:
+        return {
+            "level": 2,
+            "label": "Level 2: Secondary Media",
+            "badge": "L2 · Media",
+            "is_high_trust": False,
+        }
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    path = (parsed.path or "").lower()
+
+    is_file = any(
+        path.endswith(ext)
+        for ext in (".pdf", ".doc", ".docx", ".csv", ".xls", ".xlsx", ".txt", ".xml")
+    )
+    is_edu = host.endswith(".edu") or ".edu." in host
+    is_gov = host.endswith(".gov") or ".gov." in host or host.endswith(".mil")
+    is_int = host.endswith(".int") or ".int." in host
+
+    if is_edu or is_gov or is_int or is_file or _host_matches(host, LEVEL0_DOMAINS):
+        if is_file:
+            badge, label = "L0 · File", "Level 0: Primary File"
+        elif is_edu:
+            badge, label = "L0 · .edu", "Level 0: .edu Academic"
+        elif is_gov:
+            badge, label = "L0 · .gov", "Level 0: .gov Institutional"
+        elif is_int:
+            badge, label = "L0 · .int", "Level 0: International Org"
+        else:
+            badge, label = "L0 · Science", "Level 0: Academic & Scientific"
+        return {"level": 0, "label": label, "badge": badge, "is_high_trust": True}
+
+    if _host_matches(host, LEVEL1_DOMAINS):
+        return {
+            "level": 1,
+            "label": "Level 1: Major News & Wire",
+            "badge": "L1 · Wire / News",
+            "is_high_trust": True,
+        }
+
+    if _host_matches(host, LEVEL4_DOMAINS):
+        return {
+            "level": 4,
+            "label": "Level 4: Low Reliability",
+            "badge": "L4 · Low Trust",
+            "is_high_trust": False,
+        }
+
+    if _host_matches(host, LEVEL3_DOMAINS):
+        return {
+            "level": 3,
+            "label": "Level 3: User-Generated / Social",
+            "badge": "L3 · Social",
+            "is_high_trust": False,
+        }
+
+    if _host_matches(host, LEVEL2_DOMAINS):
+        return {
+            "level": 2,
+            "label": "Level 2: Secondary Media",
+            "badge": "L2 · Media",
+            "is_high_trust": False,
+        }
+
+    return {
+        "level": 2,
+        "label": "Level 2: Secondary Media",
+        "badge": "L2 · Media",
+        "is_high_trust": False,
+    }
+
+
+def _is_trusted(url: str) -> bool:
+    return _classify_source(url)["level"] <= 1
+
+
+def _is_low_quality(url: str) -> bool:
+    return _classify_source(url)["level"] >= 3
 
 
 def call_research(claim: str) -> dict:
@@ -205,14 +276,8 @@ def call_research(claim: str) -> dict:
     # Attach factual snippets (and pad to 2–3) from ranked web search hits.
     sources, weak_sources = _enrich_sources_with_facts(claim, sources)
     verdict, explanation = _parse_verdict(content)
-    return {
-        "mode": "research",
-        "verdict": verdict,
-        "explanation": explanation,
-        "content": content,
-        "sources": sources,
-        "weak_sources": weak_sources,
-    }
+    out = _result_payload("research", claim, verdict, explanation, content, sources, weak_sources)
+    return out
 
 
 def call_mcp(claim: str) -> dict:
@@ -264,14 +329,7 @@ def call_mcp(claim: str) -> dict:
     sources = _sources_from_markdown(content)
     sources, weak_sources = _enrich_sources_with_facts(claim, sources)
     verdict, explanation = _parse_verdict(content)
-    return {
-        "mode": "mcp",
-        "verdict": verdict,
-        "explanation": explanation,
-        "content": content,
-        "sources": sources,
-        "weak_sources": weak_sources,
-    }
+    return _result_payload("mcp", claim, verdict, explanation, content, sources, weak_sources)
 
 
 def _parse_jsonrpc(raw: str) -> dict:
@@ -302,29 +360,28 @@ def _hostname(url: str) -> str:
     return host.lower().removeprefix("www.")
 
 
-def _is_trusted(url: str) -> bool:
-    host = _hostname(url)
-    if not host:
-        return False
-    if any(host.endswith(tld) for tld in TRUSTED_TLDS):
-        return True
-    return any(host == d or host.endswith("." + d) for d in TRUSTED_DOMAINS)
-
-
-def _is_low_quality(url: str) -> bool:
-    host = _hostname(url)
-    return any(host == d or host.endswith("." + d) for d in LOW_QUALITY_DOMAINS)
-
-
 def _source_rank(source: dict) -> tuple:
-    """Lower is better: trusted + factual snippets first, junk last."""
-    url = source.get("url", "")
+    """Lower is better: SoT level first, then prefer factual snippets."""
+    level = source.get("level")
+    if level is None:
+        level = _classify_source(source.get("url", "")).get("level", 2)
     has_fact = 0 if (source.get("snippet") or "").strip() else 1
-    if _is_low_quality(url):
-        return (3, has_fact, url)
-    if _is_trusted(url):
-        return (0, has_fact, url)
-    return (1, has_fact, url)
+    return (level, has_fact, source.get("url", ""))
+
+
+def _decorate_source(url: str, title: str, snippet: str = "") -> dict:
+    """Attach SoT classification + factual snippet fields to a source."""
+    cls = _classify_source(url)
+    return {
+        "url": url,
+        "title": title or url,
+        "snippet": snippet or "",
+        "level": cls["level"],
+        "label": cls["label"],
+        "badge": cls["badge"],
+        "is_high_trust": cls["is_high_trust"],
+        "trusted": cls["level"] <= 1,
+    }
 
 
 def _snippet_fact_score(text: str) -> int:
@@ -383,7 +440,7 @@ def _extract_source_fields(s) -> dict:
 
 
 def _normalize_sources(raw) -> list:
-    """Dedupe, drop empty/low-quality URLs, prefer trusted + factual, cap at 3."""
+    """Dedupe, keep SoT Level 0–2, prefer factual snippets, cap at 3."""
     seen, out = set(), []
     cleaned = []
     for s in raw or []:
@@ -392,29 +449,16 @@ def _normalize_sources(raw) -> list:
         if not url or not url.startswith("http"):
             continue
         url = url.rstrip(".,);]")
+        # Main list only keeps Level 0–2; L3/L4 go to weak_sources.
         if _is_low_quality(url):
             continue
-        cleaned.append(
-            {
-                "url": url,
-                "title": fields["title"],
-                "snippet": fields["snippet"],
-                "trusted": _is_trusted(url),
-            }
-        )
+        cleaned.append(_decorate_source(url, fields["title"], fields["snippet"]))
 
     for s in sorted(cleaned, key=_source_rank):
         if s["url"] in seen:
             continue
         seen.add(s["url"])
-        out.append(
-            {
-                "url": s["url"],
-                "title": s["title"],
-                "snippet": s["snippet"],
-                "trusted": s["trusted"],
-            }
-        )
+        out.append(s)
         if len(out) >= MAX_SOURCES:
             break
     return out
@@ -438,11 +482,11 @@ def _hit_to_source(r: dict) -> dict:
     url = (r.get("url") or "").strip()
     title = (r.get("title") or "").strip() or url
     snips = r.get("snippets") or ([r["description"]] if r.get("description") else [])
-    return {"url": url, "title": title, "snippet": _best_snippet(snips)}
+    return _decorate_source(url, title, _best_snippet(snips))
 
 
 def _collect_weak_sources(hits: list, reliable: list) -> list:
-    """Pick up to 2 non-reliable hits (forums, blogs, thin evidence) if found."""
+    """Pick up to 2 SoT Level 3/4 hits (social, blogs, low-trust) if found."""
     skip_urls = {(s.get("url") or "").rstrip(".,);]") for s in reliable}
     skip_hosts = {_hostname(u) for u in skip_urls if u}
     candidates = []
@@ -450,57 +494,43 @@ def _collect_weak_sources(hits: list, reliable: list) -> list:
     for r in hits or []:
         if not isinstance(r, dict):
             continue
-        # Raw Search hits have snippets/description; already-normalized ones have snippet.
         if "snippets" in r or "description" in r:
             h = _hit_to_source(r)
+        elif r.get("level") is not None:
+            h = r
         else:
-            h = {
-                "url": (r.get("url") or "").strip(),
-                "title": (r.get("title") or "").strip(),
-                "snippet": (r.get("snippet") or "").strip(),
-            }
+            h = _decorate_source(
+                (r.get("url") or "").strip(),
+                (r.get("title") or "").strip(),
+                (r.get("snippet") or "").strip(),
+            )
         url = (h.get("url") or "").strip().rstrip(".,);]")
         if not url or not url.startswith("http") or url in skip_urls or url in seen:
             continue
         host = _hostname(url)
         if not host or host in skip_hosts:
             continue
-        # Never put government / education / known-trusted hosts in the weak list.
-        if _is_trusted(url):
-            continue
-
-        low = _is_low_quality(url)
-        title = h.get("title") or ""
+        level = h.get("level", _classify_source(url)["level"])
+        title = h.get("title") or url
         snippet = h.get("snippet") or ""
-        fact = _snippet_fact_score(snippet)
         opinion = bool(OPINION_MARKERS.search(f"{title} {snippet}"))
-        # Prefer forums/social; otherwise only thin or opinion-y untrusted pages.
-        if not low and not opinion and fact >= 2:
+        # Weak list: SoT L3/L4, or thin opinion-y unverified pages.
+        if level < 3 and not opinion:
             continue
-        if low:
-            reason = "forum / social"
-        elif opinion:
-            reason = "opinion / rumor"
-        else:
-            reason = "unverified · weak evidence"
+        if level < 3:
+            level = 3
+            h = _decorate_source(url, title, snippet)
+            h["level"] = 3
+            h["badge"] = "L3 · Opinion"
+            h["label"] = "Level 3: Opinion / Unverified"
+        reason = h.get("label") or ("forum / social" if level >= 3 else "unverified")
         seen.add(url)
-        candidates.append(
-            {
-                "url": url,
-                "title": title or url,
-                "snippet": snippet,
-                "trusted": False,
-                "reason": reason,
-            }
-        )
+        item = dict(h)
+        item["reason"] = reason
+        item["trusted"] = False
+        candidates.append(item)
 
-    candidates.sort(
-        key=lambda c: (
-            0 if _is_low_quality(c["url"]) else 1,
-            0 if OPINION_MARKERS.search(f"{c.get('title','')} {c.get('snippet','')}") else 1,
-            _snippet_fact_score(c.get("snippet") or ""),
-        )
-    )
+    candidates.sort(key=lambda c: (-int(c.get("level") or 3), _snippet_fact_score(c.get("snippet") or "")))
     return candidates[:MAX_WEAK_SOURCES]
 
 
@@ -541,14 +571,7 @@ def _enrich_sources_with_facts(claim: str, sources: list, hits=None) -> tuple:
                 snippet = match["snippet"]
             if (not title or title == s["url"]) and match.get("title"):
                 title = match["title"]
-        enriched.append(
-            {
-                "url": s["url"],
-                "title": title,
-                "snippet": snippet,
-                "trusted": s.get("trusted", _is_trusted(s["url"])),
-            }
-        )
+        enriched.append(_decorate_source(s["url"], title, snippet))
 
     # Prefer search hits that already carry factual snippets when we need more.
     need = max(0, MIN_SOURCES - len(enriched))
@@ -556,24 +579,14 @@ def _enrich_sources_with_facts(claim: str, sources: list, hits=None) -> tuple:
         existing = {_hostname(e["url"]) for e in enriched}
         factual_extras = sorted(
             [h for h in hit_sources if _hostname(h["url"]) not in existing],
-            key=lambda h: (
-                0 if _is_trusted(h["url"]) else 1,
-                -_snippet_fact_score(h["snippet"]),
-            ),
+            key=lambda h: (h.get("level", 2), -_snippet_fact_score(h.get("snippet") or "")),
         )
         for h in factual_extras:
             if _is_low_quality(h["url"]):
                 continue
             if not h.get("snippet") and len(enriched) >= MIN_SOURCES:
                 continue
-            enriched.append(
-                {
-                    "url": h["url"],
-                    "title": h["title"],
-                    "snippet": h["snippet"],
-                    "trusted": _is_trusted(h["url"]),
-                }
-            )
+            enriched.append(h if h.get("level") is not None else _decorate_source(h["url"], h["title"], h.get("snippet") or ""))
             existing.add(_hostname(h["url"]))
             if len(enriched) >= MAX_SOURCES and all(e.get("snippet") for e in enriched[:MIN_SOURCES]):
                 break
@@ -593,6 +606,18 @@ def _enrich_sources_with_facts(claim: str, sources: list, hits=None) -> tuple:
             pass
 
     return reliable, weak
+
+
+def _result_payload(mode: str, claim_unused: str, verdict: str, explanation: str, content: str, sources: list, weak_sources: list) -> dict:
+    return {
+        "mode": mode,
+        "verdict": verdict,
+        "explanation": explanation,
+        "content": content,
+        "sources": sources,
+        "weak_sources": weak_sources,
+        "has_level0": any(int(s.get("level", 99)) == 0 for s in sources),
+    }
 
 
 def _fetch_search_hits(claim: str, count: int = 8) -> list:
@@ -620,14 +645,9 @@ def call_search(claim: str) -> dict:
     sources, weak_sources = _enrich_sources_with_facts(claim, raw_sources, hits=results)
     # Lead explanation with the strongest factual snippets we kept.
     explanation_bits = [s["snippet"] for s in sources if s.get("snippet")][:2]
-    return {
-        "mode": "search",
-        "verdict": "UNVERIFIED",
-        "explanation": " ".join(explanation_bits)[:280] or "See sources below.",
-        "content": "\n".join(f"- {s}" for s in explanation_bits),
-        "sources": sources,
-        "weak_sources": weak_sources,
-    }
+    explanation = " ".join(explanation_bits)[:280] or "See sources below."
+    content = "\n".join(f"- {s}" for s in explanation_bits)
+    return _result_payload("search", claim, "UNVERIFIED", explanation, content, sources, weak_sources)
 
 
 def _parse_verdict(content: str):

@@ -59,14 +59,24 @@ Cloudflare, which 403s the default `Python-urllib` agent (error 1010).
 | `server.py` | Stdlib HTTP server: serves the UI + proxies to You.com |
 | `index.html` | Podcast UI: video, live captions, fact-check feed |
 
+## Source Trust (SoT)
+
+Citations are ranked **Level 0–4** (see `SoT_Markdown.md`): `.edu`/`.gov`/science
+first, then wire services, then niche media. Social/tabloid hits appear in a
+secondary less-reliable list when found.
+
 ## Live feeds
 
 Switch to **Live Feed**, paste a URL from **YouTube**, **Kick**, **TikTok**,
 **Instagram**, or **Facebook**, then **Load stream**. Press **● Go Live**, pick
 **this Chrome tab**, and enable **Share tab audio** — LiveCheck captures the
-podcaster’s voice from the stream (not the mic) and checks claims against the
-**You.com** web index.
+podcaster’s voice from the stream and checks claims against the **You.com** index.
 
 - YouTube & Kick usually embed in-app.
 - TikTok / Instagram Live often need “Open stream” (platform embed limits).
-- Keep speakers on so speech recognition can pick up what is said.
+
+## Demo tips
+
+- **Chrome/Edge only** for speech recognition. Requires an internet connection.
+- Research mode is higher quality but slower; switch to **Fast** for a snappier demo.
+- No camera? The UI still works — the stage just shows a gradient.

@@ -204,7 +204,7 @@
   }
   .card .source a {
     color: var(--accent); text-decoration: none; font-size: 12px; font-weight: 600;
-    display: flex; align-items: baseline; gap: 6px;
+    display: flex; align-items: center; gap: 6px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .card .source a:hover { text-decoration: underline; }
@@ -234,6 +234,71 @@
     font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
     color: var(--misleading); opacity: .9;
   }
+
+  /* ---- Source Trust Architecture (SoT) ---- */
+  .top-trust-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(47, 191, 113, 0.15); border: 1px solid var(--true);
+    color: var(--true); font-size: 11px; font-weight: 700;
+    padding: 4px 9px; border-radius: 6px; margin-bottom: 10px;
+    letter-spacing: .02em;
+  }
+  .source-pill {
+    font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 4px;
+    white-space: nowrap; letter-spacing: .02em; flex-shrink: 0;
+  }
+  .source-pill.level-0 { background: #2fbf71; color: #0b0d12; }
+  .source-pill.level-1 { background: #6c8cff; color: #0b0d12; }
+  .source-pill.level-2 { background: #38bdf8; color: #0b0d12; }
+  .source-pill.level-3 { background: #ffb02e; color: #0b0d12; }
+  .source-pill.level-4 { background: #ff4d5e; color: #fff; }
+  .card .source.level-0 { border-color: rgba(47, 191, 113, 0.35); background: rgba(47, 191, 113, 0.06); }
+  .card .source.level-1 { border-color: rgba(108, 140, 255, 0.35); background: rgba(108, 140, 255, 0.06); }
+  .card .source.level-2 { border-color: rgba(56, 189, 248, 0.28); background: rgba(56, 189, 248, 0.05); }
+
+  .sot-legend {
+    margin: 8px 14px 4px; padding: 10px 12px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .legend-head {
+    font-size: 11px; font-weight: 700; color: var(--muted);
+    letter-spacing: 0.03em; text-transform: uppercase;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .legend-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .legend-item {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: 600; padding: 3px 6px; border-radius: 4px;
+    border: 1px solid transparent;
+  }
+  .legend-item.lvl-0-box { background: rgba(47, 191, 113, 0.12); color: #2fbf71; border-color: rgba(47, 191, 113, 0.35); }
+  .legend-item.lvl-1-box { background: rgba(108, 140, 255, 0.12); color: #6c8cff; border-color: rgba(108, 140, 255, 0.35); }
+  .legend-item.lvl-2-box { background: rgba(56, 189, 248, 0.12); color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); }
+  .legend-item.lvl-3-box { background: rgba(255, 176, 46, 0.12); color: #ffb02e; border-color: rgba(255, 176, 46, 0.35); }
+  .legend-item.lvl-4-box { background: rgba(255, 77, 94, 0.12); color: #ff4d5e; border-color: rgba(255, 77, 94, 0.35); }
+
+  .mic-test-panel {
+    margin-top: 10px; padding: 12px 16px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px;
+    display: none; flex-direction: column; gap: 8px;
+  }
+  .mic-test-panel.on { display: flex; }
+  .mic-meter-header { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+  .mic-meter-header .btn-sm {
+    margin-left: auto; background: transparent; border: 1px solid var(--line);
+    color: var(--muted); padding: 3px 8px; border-radius: 6px; cursor: pointer; font-size: 11px;
+  }
+  .mic-meter-bar-wrap {
+    height: 10px; background: #000; border-radius: 5px; overflow: hidden; border: 1px solid var(--line);
+  }
+  .mic-meter-bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--true), var(--misleading), var(--false));
+    transition: width 0.08s ease-out;
+  }
+  .mic-test-note { font-size: 12px; color: var(--muted); }
+
   .spinner {
     width: 13px; height: 13px; border: 2px solid var(--line);
     border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite;
@@ -248,6 +313,7 @@
   <div class="logo">Live<span>Check</span></div>
   <div class="tag">Live stream & podcast fact detector · powered by You.com</div>
   <div class="spacer"></div>
+  <div class="pill" title="Source Trust Architecture"><span style="color:var(--true);font-weight:700;">SoT L0–L4</span></div>
   <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Idle</span></div>
 </header>
 
@@ -277,8 +343,18 @@
     <div class="listen-hint" id="listenHint">
       Tip: after you click Go Live, choose <b>this Chrome tab</b> and enable <b>Share tab audio</b> so LiveCheck hears the podcaster (works with headphones too).
     </div>
+    <div class="mic-test-panel" id="micTestPanel">
+      <div class="mic-meter-header">
+        <span>Mic signal</span>
+        <span id="micTestStatus">Idle</span>
+        <button class="btn-sm" id="closeMicTest" type="button">Close</button>
+      </div>
+      <div class="mic-meter-bar-wrap"><div class="mic-meter-bar" id="micMeterBar"></div></div>
+      <div class="mic-test-note" id="micTestNote">Optional check before going live on webcam.</div>
+    </div>
     <div class="controls">
       <button class="btn primary" id="goBtn">● Go Live</button>
+      <button class="btn" id="micTestBtn" type="button">Mic test</button>
       <button class="btn" id="checkBtn" disabled>Fact-check last sentence</button>
       <div class="spacer"></div>
       <span class="hint">Depth:</span>
@@ -301,6 +377,19 @@
       <div class="stat false" data-k="false"><span class="stat-num" id="sFalse">0</span><span class="stat-label">False</span></div>
       <div class="stat misleading" data-k="misleading"><span class="stat-num" id="sMisleading">0</span><span class="stat-label">Misleading</span></div>
       <div class="stat unverified" data-k="unverified"><span class="stat-num" id="sUnverified">0</span><span class="stat-label">Unverified</span></div>
+    </div>
+    <div class="sot-legend" id="sotLegend">
+      <div class="legend-head">
+        <span>Source Trust Legend</span>
+        <span style="font-size:9px;color:var(--muted);">SoT Matrix</span>
+      </div>
+      <div class="legend-grid">
+        <div class="legend-item lvl-0-box"><span class="source-pill level-0">L0</span><span>.edu / .gov / science</span></div>
+        <div class="legend-item lvl-1-box"><span class="source-pill level-1">L1</span><span>Wire / major news</span></div>
+        <div class="legend-item lvl-2-box"><span class="source-pill level-2">L2</span><span>Niche / tech media</span></div>
+        <div class="legend-item lvl-3-box"><span class="source-pill level-3">L3</span><span>Social / blogs</span></div>
+        <div class="legend-item lvl-4-box"><span class="source-pill level-4">L4</span><span>Low reliability</span></div>
+      </div>
     </div>
     <div class="cards" id="cards">
       <div class="empty-state" id="emptyState">
@@ -532,6 +621,8 @@ function setInputSource(src) {
     c.classList.toggle("active", c.dataset.source === src)
   );
   $("feedBar").classList.toggle("on", src === "stream");
+  $("micTestBtn").style.display = src === "webcam" ? "" : "none";
+  if (src !== "webcam") stopMicTest();
   if (src === "webcam") {
     showWebcamStage();
     caption.classList.add("empty");
@@ -697,18 +788,28 @@ function hostnameOf(url) {
 
 function renderSourceCard(s, weak) {
   const host = hostnameOf(s.url);
-  const trusted = !weak && s.trusted ? " trusted" : "";
+  const level = (s.level !== undefined && s.level !== null) ? s.level : (weak ? 3 : 2);
+  const trusted = !weak && (s.trusted || level <= 1) ? " trusted" : "";
   const label = s.title && s.title !== s.url ? s.title : host || s.url;
   const fact = (s.snippet || "").trim();
   const factHtml = fact
     ? `<div class="fact">${escapeHtml(fact)}</div>`
     : `<div class="fact empty">No excerpt available</div>`;
+  const defaultBadges = {
+    0: "L0 · .edu / File",
+    1: "L1 · Wire / News",
+    2: "L2 · Media",
+    3: "L3 · Social",
+    4: "L4 · Low Trust",
+  };
+  const badge = s.badge || defaultBadges[level] || `L${level}`;
   const reason = weak && s.reason
     ? `<div class="reason">${escapeHtml(s.reason)}</div>`
     : "";
-  return `<div class="source${weak ? " weak" : ""}">
+  return `<div class="source${weak ? " weak" : ""} level-${level}">
     ${reason}
     <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">
+      <span class="source-pill level-${level}">${escapeHtml(badge)}</span>
       <span class="host${trusted}">${escapeHtml(host || "source")}</span>
       <span class="title">${escapeHtml(label)}</span>
     </a>
@@ -725,24 +826,93 @@ function renderResult(card, claim, data) {
   scores[key]++; document.getElementById(tileId).textContent = scores[key]; bumpStat(tileId);
   const list = (data.sources || []).filter((s) => s.url).slice(0, 3);
   const weak = (data.weak_sources || []).filter((s) => s.url).slice(0, 2);
+  const hasLevel0 = data.has_level0 || list.some((s) => s.level === 0);
+  const level0Badge = hasLevel0
+    ? `<div class="top-trust-badge">Level 0 authority citation (.edu / .gov / science / file)</div>`
+    : "";
   const sources = list.map((s) => renderSourceCard(s, false)).join("");
   const weakHtml = weak.map((s) => renderSourceCard(s, true)).join("");
   let sourcesBlock = list.length
-    ? `<div class="sources-label">${list.length} reliable source${list.length === 1 ? "" : "s"} · factual excerpts</div>
+    ? `<div class="sources-label">${list.length} reliable source${list.length === 1 ? "" : "s"} · SoT ranked</div>
        <div class="sources">${sources}</div>`
     : `<div class="sources-label">No solid sources found</div>`;
   if (weak.length) {
     sourcesBlock += `
-      <div class="sources-label weak">${weak.length} less-reliable hit${weak.length === 1 ? "" : "s"} · not strong evidence</div>
+      <div class="sources-label weak">${weak.length} less-reliable hit${weak.length === 1 ? "" : "s"} · SoT L3/L4</div>
       <div class="sources">${weakHtml}</div>`;
   }
   card.innerHTML = `
+    ${level0Badge}
     <div class="claim">${escapeHtml(claim)}</div>
     <div class="verdict-row"><span class="verdict ${v}">${v}</span>
       <span class="hint">${data.mode === "search" ? "web sources" : data.mode === "mcp" ? "via MCP · grounded" : "grounded verdict"}</span></div>
     <div class="explain">${escapeHtml(data.explanation || "")}</div>
     ${sourcesBlock}`;
 }
+
+// ---------- Mic test (webcam helper from ScreenShareMode) ----------
+let testAudioCtx = null;
+let testMicStream = null;
+let testAnalyser = null;
+let testAnimId = null;
+
+async function startMicTest() {
+  const panel = $("micTestPanel");
+  const status = $("micTestStatus");
+  const note = $("micTestNote");
+  const bar = $("micMeterBar");
+  panel.classList.add("on");
+  status.textContent = "Connecting…";
+  note.textContent = "Grant microphone permission if asked.";
+  try {
+    testMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    testAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = testAudioCtx.createMediaStreamSource(testMicStream);
+    testAnalyser = testAudioCtx.createAnalyser();
+    testAnalyser.fftSize = 256;
+    source.connect(testAnalyser);
+    const dataArray = new Uint8Array(testAnalyser.frequencyBinCount);
+    status.textContent = "Active · speak to test";
+    let heard = false;
+    function tick() {
+      if (!testAnalyser) return;
+      testAnalyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+      const pct = Math.min(100, Math.round((sum / dataArray.length / 128) * 200));
+      bar.style.width = pct + "%";
+      if (pct > 8) {
+        heard = true;
+        note.innerHTML = `<span style="color:var(--true);font-weight:600;">Mic OK · level ${pct}%</span>`;
+      } else if (!heard) {
+        note.textContent = "Listening… speak into the mic.";
+      }
+      testAnimId = requestAnimationFrame(tick);
+    }
+    tick();
+  } catch (e) {
+    status.textContent = "Mic failed";
+    note.innerHTML = `<span style="color:var(--false);">${escapeHtml(e.message || "Access denied")}</span>`;
+  }
+}
+
+function stopMicTest() {
+  if (testAnimId) cancelAnimationFrame(testAnimId);
+  testAnimId = null;
+  if (testMicStream) testMicStream.getTracks().forEach((t) => t.stop());
+  testMicStream = null;
+  if (testAudioCtx) try { testAudioCtx.close(); } catch (_) {}
+  testAudioCtx = null;
+  testAnalyser = null;
+  $("micTestPanel").classList.remove("on");
+  $("micMeterBar").style.width = "0%";
+}
+
+$("micTestBtn").addEventListener("click", () => {
+  if ($("micTestPanel").classList.contains("on")) stopMicTest();
+  else startMicTest();
+});
+$("closeMicTest").addEventListener("click", stopMicTest);
 
 // ---------- Controls ----------
 function encodeWav(floatChunks, sampleRate) {
