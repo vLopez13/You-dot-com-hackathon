@@ -29,17 +29,25 @@ Speech API), click **● Go Live**, allow the mic + camera, and start talking.
 - Finalized sentences run through a lightweight **claim detector** (numbers,
   dates, comparatives, is/are assertions) — claim-like sentences are checked
   automatically. You can also force-check the last sentence with the button.
+- Each check aims for **2–3 real web citations** with **factual excerpts**
+  (stats, dates, named findings). Research/MCP boost trusted domains
+  (`.gov` / `.edu` / `.int`, CDC, WHO, NIH, Al Jazeera, National Geographic,
+  Forbes, Washington Post, wire services, encyclopedias), drop low-quality
+  forums/social hits from the main list, and enrich thin citations with Search
+  snippets that carry concrete data. When weaker hits exist (Reddit, Quora,
+  rumor/opinion pages), up to **2** appear in a secondary “less-reliable” list
+  under the trusted sources for contrast.
+
 Three interchangeable You.com integrations, switchable in the UI:
 
-- **REST** → `POST https://api.you.com/v1/research`, a grounded, cited answer.
-  The backend prompts it to lead with `VERDICT: TRUE|FALSE|MISLEADING|
-  UNVERIFIED`, which becomes the badge.
+- **REST** → `POST https://api.you.com/v1/research`, a grounded, cited answer
+  with `source_control` boosts. Prompted to lead with `VERDICT:
+  TRUE|FALSE|MISLEADING|UNVERIFIED` and cite 2–3 reliable sources.
 - **MCP** → `POST https://api.you.com/mcp` (JSON-RPC), calling the server's
-  `you-research` tool. Same Research engine, reached over the Model Context
-  Protocol with `Authorization: Bearer` auth. Source URLs are extracted from
-  the answer markdown.
+  `you-research` tool with the same prompt + source control. Source URLs are
+  extracted from the answer markdown, then ranked/padded.
 - **Fast** → `GET https://ydc-index.io/v1/search` for quick web evidence
-  (no synthesized verdict) when you want lower latency during a live demo.
+  (no synthesized verdict), ranked toward trusted domains.
 
 All requests send a browser `User-Agent` — `api.you.com` sits behind
 Cloudflare, which 403s the default `Python-urllib` agent (error 1010).
@@ -51,10 +59,14 @@ Cloudflare, which 403s the default `Python-urllib` agent (error 1010).
 | `server.py` | Stdlib HTTP server: serves the UI + proxies to You.com |
 | `index.html` | Podcast UI: video, live captions, fact-check feed |
 
-## Demo tips
+## Live feeds
 
-- **Chrome/Edge only** for speech recognition. Requires an internet connection.
-- To fact-check an actual podcast, play it out loud so the mic picks it up.
-- Research mode is higher quality but slower; switch to **Fast** mode for a
-  snappier live demo.
-- No camera? The UI still works — the stage just shows a gradient.
+Switch to **Live Feed**, paste a URL from **YouTube**, **Kick**, **TikTok**,
+**Instagram**, or **Facebook**, then **Load stream**. Press **● Go Live**, pick
+**this Chrome tab**, and enable **Share tab audio** — LiveCheck captures the
+podcaster’s voice from the stream (not the mic) and checks claims against the
+**You.com** web index.
+
+- YouTube & Kick usually embed in-app.
+- TikTok / Instagram Live often need “Open stream” (platform embed limits).
+- Keep speakers on so speech recognition can pick up what is said.

@@ -66,12 +66,65 @@
     background: #000; border: 1px solid var(--line); min-height: 0;
   }
   video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  video.mirror-off { transform: none; object-fit: contain; background: #000; }
+  #streamFrame {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    border: 0; display: none; background: #000; z-index: 1;
+  }
+  #streamFrame.on { display: block; }
+  #video.hidden, .video-wrap.stream-mode #video { display: none; }
+  .stream-fallback {
+    position: absolute; inset: 0; z-index: 1; display: none;
+    align-items: center; justify-content: center; flex-direction: column;
+    gap: 12px; padding: 28px; text-align: center;
+    background: linear-gradient(160deg, #141821, #0b0d12 60%);
+  }
+  .stream-fallback.on { display: flex; }
+  .stream-fallback h3 { margin: 0; font-size: 18px; }
+  .stream-fallback p { margin: 0; color: var(--muted); font-size: 13px; max-width: 360px; line-height: 1.5; }
+  .stream-fallback .platform-tag {
+    font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 4px;
+  }
+  .feed-bar {
+    display: none; gap: 8px; align-items: center; flex-wrap: wrap;
+    padding: 0 0 12px;
+  }
+  .feed-bar.on { display: flex; }
+  .feed-bar input {
+    flex: 1; min-width: 180px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px;
+    font-size: 13px; outline: none;
+  }
+  .feed-bar input:focus { border-color: var(--accent); }
+  .feed-bar input::placeholder { color: var(--muted); }
+  .source-toggle {
+    display: flex; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden; margin-bottom: 12px;
+  }
+  .source-toggle button {
+    border: 0; background: transparent; color: var(--muted); padding: 8px 14px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .source-toggle button.active { background: var(--accent); color: #fff; }
+  .listen-hint {
+    display: none; margin-top: 8px; font-size: 12px; color: var(--muted);
+    padding: 8px 10px; border-radius: 8px; background: rgba(108,140,255,.08);
+    border: 1px solid rgba(108,140,255,.2);
+  }
+  .listen-hint.on { display: block; }
   .badge-live {
     position: absolute; top: 14px; left: 14px; z-index: 3;
     background: rgba(255,77,94,.9); color: #fff; font-size: 11px; font-weight: 700;
     padding: 5px 10px; border-radius: 6px; letter-spacing: .05em; display: none;
   }
   .badge-live.on { display: block; }
+  .badge-platform {
+    position: absolute; top: 14px; right: 14px; z-index: 3;
+    background: rgba(20,24,33,.88); color: var(--text); font-size: 11px; font-weight: 700;
+    padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); display: none;
+  }
+  .badge-platform.on { display: block; }
   .caption {
     position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
     padding: 40px 26px 22px;
@@ -139,12 +192,48 @@
   .card.FALSE { border-left-color: var(--false); }
   .card.MISLEADING { border-left-color: var(--misleading); }
   .card .explain { color: #cdd3e0; font-size: 13px; margin-bottom: 10px; }
-  .card .sources { display: flex; flex-direction: column; gap: 4px; }
-  .card .sources a {
-    color: var(--accent); text-decoration: none; font-size: 12px;
+  .card .sources-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .card .sources { display: flex; flex-direction: column; gap: 8px; }
+  .card .source {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 8px 10px; border-radius: 8px;
+    background: rgba(0,0,0,.18); border: 1px solid var(--line);
+  }
+  .card .source a {
+    color: var(--accent); text-decoration: none; font-size: 12px; font-weight: 600;
+    display: flex; align-items: baseline; gap: 6px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .card .sources a:hover { text-decoration: underline; }
+  .card .source a:hover { text-decoration: underline; }
+  .card .source .host {
+    flex-shrink: 0; color: var(--muted); font-size: 11px; font-weight: 700;
+  }
+  .card .source .host.trusted { color: var(--true); }
+  .card .source .title {
+    overflow: hidden; text-overflow: ellipsis; font-weight: 500;
+  }
+  .card .source .fact {
+    color: #cdd3e0; font-size: 12px; line-height: 1.45;
+    border-left: 2px solid rgba(108,140,255,.45); padding-left: 8px;
+  }
+  .card .source .fact.empty { color: var(--muted); font-style: italic; border-left-color: var(--line); }
+  .card .sources-label.weak {
+    margin-top: 12px; color: var(--misleading);
+  }
+  .card .source.weak {
+    background: rgba(255,176,46,.06); border-color: rgba(255,176,46,.28);
+  }
+  .card .source.weak .host { color: var(--misleading); }
+  .card .source.weak .fact {
+    border-left-color: rgba(255,176,46,.5); color: #d8c9a8;
+  }
+  .card .source .reason {
+    font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--misleading); opacity: .9;
+  }
   .spinner {
     width: 13px; height: 13px; border: 2px solid var(--line);
     border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite;
@@ -157,17 +246,36 @@
 <body>
 <header>
   <div class="logo">Live<span>Check</span></div>
-  <div class="tag">Real-time podcast fact detector · powered by You.com</div>
+  <div class="tag">Live stream & podcast fact detector · powered by You.com</div>
   <div class="spacer"></div>
   <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Idle</span></div>
 </header>
 
 <main>
   <section class="stage">
-    <div class="video-wrap">
+    <div class="source-toggle" id="sourceToggle">
+      <button data-source="webcam" class="active">Webcam</button>
+      <button data-source="stream">Live Feed</button>
+    </div>
+    <div class="feed-bar" id="feedBar">
+      <input id="streamUrl" type="url" placeholder="Paste a live URL — YouTube, Kick, TikTok, Instagram, or Facebook" />
+      <button class="btn" id="loadStreamBtn">Load stream</button>
+    </div>
+    <div class="video-wrap" id="videoWrap">
       <div class="badge-live" id="liveBadge">● LIVE</div>
+      <div class="badge-platform" id="platformBadge"></div>
       <video id="video" autoplay muted playsinline></video>
-      <div class="caption empty" id="caption">Press “Go Live” and start speaking — captions appear here.</div>
+      <iframe id="streamFrame" title="Live stream" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      <div class="stream-fallback" id="streamFallback">
+        <div class="platform-tag" id="fallbackPlatform">Live feed</div>
+        <h3 id="fallbackTitle">Load a live stream</h3>
+        <p id="fallbackNote">Paste a YouTube, Kick, TikTok, Instagram, or Facebook live URL above. Turn speaker volume up so the mic can hear claims to fact-check.</p>
+        <a class="btn primary" id="fallbackOpen" href="#" target="_blank" rel="noopener" style="display:none">Open stream</a>
+      </div>
+      <div class="caption empty" id="caption">Press “Go Live” — captions from the stream (via mic) appear here.</div>
+    </div>
+    <div class="listen-hint" id="listenHint">
+      Tip: after you click Go Live, choose <b>this Chrome tab</b> and enable <b>Share tab audio</b> so LiveCheck hears the podcaster (works with headphones too).
     </div>
     <div class="controls">
       <button class="btn primary" id="goBtn">● Go Live</button>
@@ -196,7 +304,7 @@
     </div>
     <div class="cards" id="cards">
       <div class="empty-state" id="emptyState">
-        Detected factual claims will appear here with a verdict and You.com sources.
+        Detected claims from webcam or live feeds (YouTube, Kick, TikTok, Instagram, Facebook) appear here with You.com sources.
       </div>
     </div>
   </aside>
@@ -208,10 +316,14 @@ const video = $("video");
 const caption = $("caption");
 const cards = $("cards");
 let mode = "research";
+let inputSource = "webcam"; // webcam | stream
 let recognizing = false;
 let recognition = null;
 let lastSentence = "";
 let checkCount = 0;
+let activeStream = null; // { platform, embedUrl, watchUrl, label }
+let displayStream = null;
+let tabAudio = null; // { ctx, processor, buffers, timer, sending }
 const seen = new Set();
 const scores = { true: 0, false: 0, misleading: 0, unverified: 0 };
 
@@ -222,18 +334,243 @@ function bumpStat(id) {
   tile.classList.add("bump");
 }
 
-// ---------- Mode toggle ----------
+// ---------- Depth mode toggle ----------
 $("modeToggle").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   mode = b.dataset.mode;
   [...$("modeToggle").children].forEach((c) => c.classList.toggle("active", c === b));
 });
 
-// ---------- Webcam (the "podcast video") ----------
+// ---------- Live feed: parse platform URLs ----------
+function parseStreamUrl(raw) {
+  const input = (raw || "").trim();
+  if (!input) return null;
+  let url;
+  try { url = new URL(input.startsWith("http") ? input : "https://" + input); }
+  catch { return null; }
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const path = url.pathname;
+  const href = url.href;
+
+  // YouTube — watch, live, shorts, youtu.be, channel live
+  if (host === "youtu.be" || host.endsWith("youtube.com") || host.endsWith("youtube-nocookie.com")) {
+    let id = url.searchParams.get("v");
+    if (!id && host === "youtu.be") id = path.split("/").filter(Boolean)[0];
+    if (!id) {
+      const m = path.match(/\/(live|shorts|embed|v)\/([A-Za-z0-9_-]{6,})/);
+      if (m) id = m[2];
+    }
+    if (id) {
+      return {
+        platform: "YouTube",
+        label: "YouTube",
+        watchUrl: href,
+        embedUrl: `https://www.youtube.com/embed/${id}?autoplay=1&rel=0`,
+        note: "Play with sound on so the mic can hear spoken claims.",
+      };
+    }
+    // Channel /live without video id — open page; embed may not work
+    return {
+      platform: "YouTube",
+      label: "YouTube Live",
+      watchUrl: href,
+      embedUrl: null,
+      note: "Open the YouTube live page, play with sound, then Go Live so LiveCheck can listen.",
+    };
+  }
+
+  // Kick
+  if (host === "kick.com" || host.endsWith(".kick.com")) {
+    const parts = path.split("/").filter(Boolean);
+    const channel = parts[0] && parts[0] !== "video" ? parts[0] : null;
+    if (channel) {
+      return {
+        platform: "Kick",
+        label: "Kick",
+        watchUrl: `https://kick.com/${channel}`,
+        embedUrl: `https://player.kick.com/${channel}`,
+        note: "Play with sound on so the mic can hear spoken claims.",
+      };
+    }
+  }
+
+  // TikTok
+  if (host.includes("tiktok.com")) {
+    const live = path.match(/@([^/]+)\/live/i);
+    const video = path.match(/\/video\/(\d+)/);
+    if (live) {
+      return {
+        platform: "TikTok",
+        label: "TikTok Live",
+        watchUrl: href,
+        embedUrl: null,
+        note: "TikTok Live rarely allows embeds — open the stream, play with sound, then Go Live.",
+      };
+    }
+    if (video) {
+      return {
+        platform: "TikTok",
+        label: "TikTok",
+        watchUrl: href,
+        embedUrl: `https://www.tiktok.com/embed/v2/${video[1]}`,
+        note: "Play with sound on so the mic can hear spoken claims.",
+      };
+    }
+    return {
+      platform: "TikTok",
+      label: "TikTok",
+      watchUrl: href,
+      embedUrl: null,
+      note: "Open the TikTok link, play with sound, then Go Live so LiveCheck can listen.",
+    };
+  }
+
+  // Instagram
+  if (host.includes("instagram.com")) {
+    const reel = path.match(/\/(reel|reels|p|tv)\/([^/?#]+)/);
+    if (reel) {
+      return {
+        platform: "Instagram",
+        label: "Instagram",
+        watchUrl: href,
+        embedUrl: `https://www.instagram.com/${reel[1]}/${reel[2]}/embed`,
+        note: "Play with sound on so the mic can hear spoken claims.",
+      };
+    }
+    return {
+      platform: "Instagram",
+      label: "Instagram Live",
+      watchUrl: href,
+      embedUrl: null,
+      note: "Instagram Live usually needs the app/site — open it with sound, then Go Live.",
+    };
+  }
+
+  // Facebook
+  if (host.includes("facebook.com") || host.includes("fb.watch") || host === "fb.com") {
+    const encoded = encodeURIComponent(href);
+    return {
+      platform: "Facebook",
+      label: "Facebook",
+      watchUrl: href,
+      embedUrl: `https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=0&autoplay=1`,
+      note: "If the embed is blocked, open Facebook with sound and Go Live to listen.",
+    };
+  }
+
+  return {
+    platform: "Web",
+    label: "Web video",
+    watchUrl: href,
+    embedUrl: null,
+    note: "Platform not recognized for embed — open the link with sound, then Go Live.",
+  };
+}
+
+function stopWebcam() {
+  const stream = video.srcObject;
+  if (stream && stream.getTracks) stream.getTracks().forEach((t) => t.stop());
+  video.srcObject = null;
+}
+
+function showWebcamStage() {
+  $("streamFrame").classList.remove("on");
+  $("streamFrame").src = "about:blank";
+  $("streamFallback").classList.remove("on");
+  $("video").style.display = "";
+  $("videoWrap").classList.remove("stream-mode");
+  $("platformBadge").classList.remove("on");
+  $("listenHint").classList.remove("on");
+  activeStream = null;
+}
+
+function applyStream(info) {
+  activeStream = info;
+  stopWebcam();
+  $("video").style.display = "none";
+  $("videoWrap").classList.add("stream-mode");
+  $("platformBadge").textContent = info.label;
+  $("platformBadge").classList.add("on");
+  $("listenHint").classList.add("on");
+
+  if (info.embedUrl) {
+    $("streamFallback").classList.remove("on");
+    $("streamFrame").src = info.embedUrl;
+    $("streamFrame").classList.add("on");
+    caption.classList.add("empty");
+    caption.textContent = "Stream loaded — press Go Live and keep speakers on so claims can be heard.";
+  } else {
+    $("streamFrame").classList.remove("on");
+    $("streamFrame").src = "about:blank";
+    $("fallbackPlatform").textContent = info.label;
+    $("fallbackTitle").textContent = `Open ${info.label} with sound`;
+    $("fallbackNote").textContent = info.note;
+    const open = $("fallbackOpen");
+    open.href = info.watchUrl;
+    open.style.display = "";
+    open.textContent = `Open ${info.label}`;
+    $("streamFallback").classList.add("on");
+    caption.classList.add("empty");
+    caption.textContent = "Open the stream, play with sound, then press Go Live.";
+  }
+  setStatus(`${info.label} ready`, false);
+}
+
+function loadStreamFromInput() {
+  const info = parseStreamUrl($("streamUrl").value);
+  if (!info) {
+    alert("Paste a valid YouTube, Kick, TikTok, Instagram, or Facebook URL.");
+    return;
+  }
+  applyStream(info);
+}
+
+// ---------- Source toggle: Webcam vs Live Feed ----------
+function setInputSource(src) {
+  inputSource = src;
+  [...$("sourceToggle").children].forEach((c) =>
+    c.classList.toggle("active", c.dataset.source === src)
+  );
+  $("feedBar").classList.toggle("on", src === "stream");
+  if (src === "webcam") {
+    showWebcamStage();
+    caption.classList.add("empty");
+    caption.textContent = "Press “Go Live” and start speaking — captions appear here.";
+    setStatus("Idle", false);
+  } else {
+    stopWebcam();
+    $("video").style.display = "none";
+    $("listenHint").classList.add("on");
+    if (!activeStream) {
+      $("streamFallback").classList.add("on");
+      $("fallbackOpen").style.display = "none";
+      caption.classList.add("empty");
+      caption.textContent = "Paste a live URL above, load it, then Go Live.";
+    }
+    setStatus("Live Feed", false);
+  }
+}
+
+$("sourceToggle").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (recognizing) {
+    alert("Stop the live session before switching source.");
+    return;
+  }
+  setInputSource(b.dataset.source);
+});
+$("loadStreamBtn").addEventListener("click", loadStreamFromInput);
+$("streamUrl").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") loadStreamFromInput();
+});
+
+// ---------- Webcam ----------
 async function startVideo() {
+  if (inputSource !== "webcam") return;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = stream;
+    video.style.display = "";
   } catch (e) {
     console.warn("No camera:", e);
     video.style.background = "linear-gradient(135deg,#1b2130,#0b0d12)";
@@ -353,6 +690,32 @@ async function runCheck(claim) {
   }
 }
 
+function hostnameOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch { return ""; }
+}
+
+function renderSourceCard(s, weak) {
+  const host = hostnameOf(s.url);
+  const trusted = !weak && s.trusted ? " trusted" : "";
+  const label = s.title && s.title !== s.url ? s.title : host || s.url;
+  const fact = (s.snippet || "").trim();
+  const factHtml = fact
+    ? `<div class="fact">${escapeHtml(fact)}</div>`
+    : `<div class="fact empty">No excerpt available</div>`;
+  const reason = weak && s.reason
+    ? `<div class="reason">${escapeHtml(s.reason)}</div>`
+    : "";
+  return `<div class="source${weak ? " weak" : ""}">
+    ${reason}
+    <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">
+      <span class="host${trusted}">${escapeHtml(host || "source")}</span>
+      <span class="title">${escapeHtml(label)}</span>
+    </a>
+    ${factHtml}
+  </div>`;
+}
+
 function renderResult(card, claim, data) {
   const v = (data.verdict || "UNVERIFIED").toUpperCase();
   card.className = "card " + v;
@@ -360,33 +723,220 @@ function renderResult(card, claim, data) {
                   MISLEADING: ["sMisleading", "misleading"], UNVERIFIED: ["sUnverified", "unverified"] };
   const [tileId, key] = tally[v] || tally.UNVERIFIED;
   scores[key]++; document.getElementById(tileId).textContent = scores[key]; bumpStat(tileId);
-  const sources = (data.sources || [])
-    .filter((s) => s.url)
-    .map((s) => `<a href="${s.url}" target="_blank" rel="noopener">↗ ${escapeHtml(s.title || s.url)}</a>`)
-    .join("");
+  const list = (data.sources || []).filter((s) => s.url).slice(0, 3);
+  const weak = (data.weak_sources || []).filter((s) => s.url).slice(0, 2);
+  const sources = list.map((s) => renderSourceCard(s, false)).join("");
+  const weakHtml = weak.map((s) => renderSourceCard(s, true)).join("");
+  let sourcesBlock = list.length
+    ? `<div class="sources-label">${list.length} reliable source${list.length === 1 ? "" : "s"} · factual excerpts</div>
+       <div class="sources">${sources}</div>`
+    : `<div class="sources-label">No solid sources found</div>`;
+  if (weak.length) {
+    sourcesBlock += `
+      <div class="sources-label weak">${weak.length} less-reliable hit${weak.length === 1 ? "" : "s"} · not strong evidence</div>
+      <div class="sources">${weakHtml}</div>`;
+  }
   card.innerHTML = `
     <div class="claim">${escapeHtml(claim)}</div>
     <div class="verdict-row"><span class="verdict ${v}">${v}</span>
       <span class="hint">${data.mode === "search" ? "web sources" : data.mode === "mcp" ? "via MCP · grounded" : "grounded verdict"}</span></div>
     <div class="explain">${escapeHtml(data.explanation || "")}</div>
-    <div class="sources">${sources}</div>`;
+    ${sourcesBlock}`;
 }
 
 // ---------- Controls ----------
-$("goBtn").addEventListener("click", () => {
+function encodeWav(floatChunks, sampleRate) {
+  let len = 0;
+  for (const c of floatChunks) len += c.length;
+  const buffer = new ArrayBuffer(44 + len * 2);
+  const view = new DataView(buffer);
+  const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + len * 2, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, len * 2, true);
+  let off = 44;
+  for (const chunk of floatChunks) {
+    for (let i = 0; i < chunk.length; i++, off += 2) {
+      const s = Math.max(-1, Math.min(1, chunk[i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+  }
+  return buffer;
+}
+
+function downsampleBuffer(buffer, inRate, outRate) {
+  if (outRate === inRate) return buffer;
+  const ratio = inRate / outRate;
+  const newLen = Math.round(buffer.length / ratio);
+  const result = new Float32Array(newLen);
+  for (let i = 0; i < newLen; i++) {
+    const start = Math.floor(i * ratio);
+    result[i] = buffer[start] || 0;
+  }
+  return result;
+}
+
+function bufferToBase64(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function flushTabAudioTranscript() {
+  if (!tabAudio || tabAudio.sending || !tabAudio.buffers.length) return;
+  const chunks = tabAudio.buffers;
+  tabAudio.buffers = [];
+  // Skip near-silent chunks so we don't spam the recognizer.
+  let peak = 0;
+  for (const c of chunks) {
+    for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]));
+  }
+  if (peak < 0.01) return;
+
+  const merged = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
+  let o = 0;
+  for (const c of chunks) { merged.set(c, o); o += c.length; }
+  const down = downsampleBuffer(merged, tabAudio.sampleRate, 16000);
+  const wav = encodeWav([down], 16000);
+  tabAudio.sending = true;
+  try {
+    const res = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wav_base64: bufferToBase64(wav), language: "en-US" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "transcribe failed");
+    const text = (data.text || "").trim();
+    if (text) {
+      caption.classList.remove("empty");
+      caption.innerHTML = `<span class="final">${escapeHtml(text)}</span>`;
+      handleFinal(text);
+    }
+  } catch (e) {
+    console.warn("tab transcribe:", e);
+  } finally {
+    if (tabAudio) tabAudio.sending = false;
+  }
+}
+
+function stopTabAudioListen() {
+  if (tabAudio) {
+    clearInterval(tabAudio.timer);
+    try { tabAudio.processor.disconnect(); } catch (_) {}
+    try { tabAudio.source.disconnect(); } catch (_) {}
+    try { tabAudio.ctx.close(); } catch (_) {}
+    tabAudio = null;
+  }
+  if (displayStream) {
+    displayStream.getTracks().forEach((t) => t.stop());
+    displayStream = null;
+  }
+}
+
+async function startTabAudioListen() {
+  stopTabAudioListen();
+  alert(
+    "Next: pick THIS Chrome tab in the share dialog and turn ON “Share tab audio”.\n\n" +
+    "That lets LiveCheck hear the podcaster directly from the video (not your mic)."
+  );
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+      preferCurrentTab: true,
+      selfBrowserSurface: "include",
+      systemAudio: "include",
+    });
+  } catch (e) {
+    throw new Error("Tab share cancelled — Live Feed needs tab audio to hear the podcaster.");
+  }
+  displayStream = stream;
+  if (!stream.getAudioTracks().length) {
+    stream.getTracks().forEach((t) => t.stop());
+    displayStream = null;
+    throw new Error('No audio track. In the share dialog, enable “Share tab audio”.');
+  }
+  stream.getVideoTracks().forEach((t) => { t.enabled = false; }); // audio-only listen; keep video embed
+  stream.getAudioTracks()[0].addEventListener("ended", () => {
+    if (recognizing) $("goBtn").click();
+  });
+
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = ctx.createMediaStreamSource(stream);
+  const processor = ctx.createScriptProcessor(4096, 1, 1);
+  const silent = ctx.createGain();
+  silent.gain.value = 0; // listen silently — user still hears the embed
+  const state = {
+    ctx, source, processor,
+    buffers: [],
+    sampleRate: ctx.sampleRate,
+    sending: false,
+    timer: null,
+  };
+  processor.onaudioprocess = (e) => {
+    if (!recognizing) return;
+    state.buffers.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  };
+  source.connect(processor);
+  processor.connect(silent);
+  silent.connect(ctx.destination);
+  state.timer = setInterval(() => { flushTabAudioTranscript(); }, 3500);
+  tabAudio = state;
+  if (ctx.state === "suspended") await ctx.resume();
+}
+
+$("goBtn").addEventListener("click", async () => {
   if (!recognizing) {
-    recognition = recognition || initRecognition();
-    if (!recognition) return;
-    recognizing = true;
-    recognition.start();
-    startVideo();
-    setStatus("Live · listening", true);
-    $("goBtn").textContent = "■ Stop";
-    $("goBtn").classList.replace("primary", "danger");
+    if (inputSource === "stream" && !activeStream) {
+      alert("Load a YouTube, Kick, TikTok, Instagram, or Facebook URL first.");
+      return;
+    }
+    try {
+      if (inputSource === "stream") {
+        await startTabAudioListen();
+        recognizing = true;
+        const label = activeStream ? activeStream.label : "stream";
+        setStatus(`Live · ${label} · listening to stream`, true);
+      } else {
+        recognition = recognition || initRecognition();
+        if (!recognition) return;
+        recognizing = true;
+        recognition.start();
+        startVideo();
+        setStatus("Live · listening", true);
+      }
+      $("goBtn").textContent = "■ Stop";
+      $("goBtn").classList.replace("primary", "danger");
+    } catch (e) {
+      recognizing = false;
+      stopTabAudioListen();
+      alert(e.message || String(e));
+    }
   } else {
     recognizing = false;
-    recognition.stop();
-    setStatus("Stopped", false);
+    if (recognition) try { recognition.stop(); } catch (_) {}
+    stopTabAudioListen();
+    setStatus(inputSource === "stream" ? (activeStream ? `${activeStream.label} ready` : "Live Feed") : "Stopped", false);
     $("goBtn").textContent = "● Go Live";
     $("goBtn").classList.replace("danger", "primary");
   }
@@ -395,6 +945,9 @@ $("goBtn").addEventListener("click", () => {
 $("checkBtn").addEventListener("click", () => {
   if (lastSentence) { seen.delete(lastSentence.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()); autoCheck(lastSentence); }
 });
+
+// Default: webcam stage
+setInputSource("webcam");
 </script>
 </body>
 </html>
