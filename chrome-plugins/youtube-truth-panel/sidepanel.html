@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Truth Panel</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header>
+      <div class="logo">Truth<span>Panel</span></div>
+      <div class="spacer"></div>
+      <div class="pill" id="backendPill" title="Backend status">
+        <span class="dot" id="backendDot"></span><span id="backendText">checking…</span>
+      </div>
+    </header>
+
+    <section class="video">
+      <div class="video-title" id="videoTitle">No YouTube video detected</div>
+      <div class="video-meta">
+        <span id="videoChannel"></span>
+        <span class="sep" id="videoSep"></span>
+        <span id="transcriptState">open a youtube.com/watch page</span>
+      </div>
+    </section>
+
+    <section class="now" id="nowBox" hidden title="Jump to this line in the transcript">
+      <span class="now-time" id="nowTime">0:00</span>
+      <span class="now-text" id="nowText"></span>
+    </section>
+
+    <section class="controls">
+      <button class="btn primary" id="scanBtn" disabled>Scan video</button>
+      <button class="btn" id="liveBtn" disabled>▶ Live follow</button>
+      <button class="btn ghost" id="clearBtn" title="Clear results">Clear</button>
+    </section>
+
+    <section class="row">
+      <span class="hint">Depth</span>
+      <div class="mode-toggle" id="modeToggle">
+        <button data-mode="research" class="active" title="You.com Research API — grounded verdict + citations">REST</button>
+        <button data-mode="mcp" title="You.com MCP server — same engine over Model Context Protocol">MCP</button>
+        <button data-mode="search" title="You.com Search API — fast evidence, no synthesized verdict">Fast</button>
+      </div>
+      <div class="spacer"></div>
+      <span class="hint">Claims</span>
+      <select id="maxClaims" title="How many claims to check in a full scan">
+        <option>5</option>
+        <option selected>8</option>
+        <option>12</option>
+        <option>20</option>
+      </select>
+    </section>
+
+    <section class="trust" id="trustBox">
+      <div class="trust-head">
+        <span class="trust-label">Trust score</span>
+        <span class="trust-value" id="trustValue">—</span>
+      </div>
+      <div class="meter"><div class="meter-fill" id="trustFill"></div></div>
+    </section>
+
+    <section class="scoreboard">
+      <div class="stat"><span class="stat-num" id="sChecked">0</span><span class="stat-label">Checked</span></div>
+      <div class="stat true"><span class="stat-num" id="sTrue">0</span><span class="stat-label">True</span></div>
+      <div class="stat false"><span class="stat-num" id="sFalse">0</span><span class="stat-label">False</span></div>
+      <div class="stat misleading"><span class="stat-num" id="sMisleading">0</span><span class="stat-label">Misleading</span></div>
+      <div class="stat unverified"><span class="stat-num" id="sUnverified">0</span><span class="stat-label">Unverif.</span></div>
+    </section>
+
+    <div class="progress" id="progress" hidden><div class="progress-fill" id="progressFill"></div></div>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="claims" class="active">Claims <span class="tab-count" id="claimCount"></span></button>
+      <button data-tab="transcript">Transcript <span class="tab-count" id="lineCount"></span></button>
+    </nav>
+
+    <main class="cards" id="cards">
+      <div class="empty-state" id="emptyState">
+        Open a YouTube video — detected claims are listed here as soon as the
+        captions load. Hit <strong>Scan video</strong> to fact-check the biggest ones,
+        or <strong>Live follow</strong> to check them as they are spoken.
+        <div class="empty-sub">Verdicts and citations come from the You.com API.</div>
+      </div>
+    </main>
+
+    <main class="transcript" id="transcript" hidden></main>
+
+    <details class="settings">
+      <summary>Settings</summary>
+      <label class="field">
+        <span>Backend URL</span>
+        <input type="text" id="endpoint" placeholder="http://127.0.0.1:8765" spellcheck="false" />
+      </label>
+      <label class="check">
+        <input type="checkbox" id="smartExtract" />
+        <span>Smart claim picking (uses You.com to choose claims — slower)</span>
+      </label>
+      <div class="settings-note">
+        Start the backend with <code>YDC_API_KEY=… python3 server.py</code> in the extension folder.
+      </div>
+    </details>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
