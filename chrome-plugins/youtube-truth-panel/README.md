@@ -70,6 +70,12 @@ Live follow only reveals what has actually been said — it is a running feed
 rather than the whole video at once. Turning it off puts everything back on
 screen, so you can scan ahead or review what you missed.
 
+**Switching videos wipes the panel.** Cards, transcript, now-playing line,
+scoreboard, trust score and progress all reset, any scan or live follow stops,
+and requests still in flight are cancelled. Each video gets a generation token,
+so a verdict that arrives after you have moved on is discarded instead of
+scoring the new video. Navigating off a watch page clears it too.
+
 Click any timestamp — on a card or a transcript line — to seek the video there.
 The **trust score** is the share of decided verdicts that held up (`MISLEADING`
 counts as a partial credit; `UNVERIFIED` is excluded).
@@ -96,6 +102,28 @@ Two You.com integrations, switchable in the panel:
 Repeated claims are cached in the backend, so re-scanning a video is free —
 cached cards are tagged `cached` and cost nothing. The cache lives in memory,
 so restarting the backend clears it.
+
+### Source trust levels
+
+Every citation is classified **Level 0–4** per
+[`SOURCE_TRUST.md`](SOURCE_TRUST.md) and each link is prefixed with its badge:
+
+| Badge | Meaning | Examples |
+|---|---|---|
+| `L0` | Institutional / peer-reviewed | `.gov`, `.edu`, `.mil`, `.int`, PubMed, Nature, NASA, WHO |
+| `L1` | Major journalism & wire services | Reuters, AP, BBC, WSJ, Pew, World Bank |
+| `L2` | Secondary / industry media | TechCrunch, Forbes, ESPN, corporate newsrooms |
+| `L3` | User-generated / opinion | Reddit, Medium, Substack, X, Wikipedia |
+| `L4` | High-bias / low-reliability | Tabloids, conspiracy domains, state propaganda |
+
+Sources are sorted best-first, and a dashed badge means the domain is not in
+the trust list and defaulted to L2. Classification is done by the backend from
+the URL, so it does not depend on the model being honest about its sourcing.
+
+Two rules can **override the model's verdict**: a `TRUE`/`FALSE` resting only
+on L3 sources, or only on L4 sources, is downgraded to `UNVERIFIED` with a
+warning on the card. A lone L1 citation is flagged but not downgraded — see the
+caveat in `SOURCE_TRUST.md`.
 
 ### Keeping the explanation readable
 
@@ -162,7 +190,8 @@ the same trail is on the status line's tooltip.
 | `background.js` | Opens the panel; injects the content script into tabs that lack it |
 | `content.js` | Caption extraction, playback tracking, seeking |
 | `sidepanel.html/.css/.js` | The panel: claim detection, fact-check queue, verdict cards |
-| `server.py` | Local backend — You.com proxy, verdict parsing, caching |
+| `server.py` | Local backend — You.com proxy, verdict parsing, source trust classification, caching |
+| `SOURCE_TRUST.md` | The Level 0–4 source trust matrix and how it is enforced |
 
 ## API
 

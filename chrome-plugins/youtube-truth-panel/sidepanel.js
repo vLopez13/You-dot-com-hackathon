@@ -33,6 +33,7 @@ const state = {
   scores: { true: 0, false: 0, misleading: 0, unverified: 0 },
   checked: 0,
   live: false,
+  generation: 0, // bumped per video, so stale replies can be dropped
   lastTime: 0,
   revealedClaims: -1, // how much of the video the live window has reached
   revealedLines: -1,
@@ -175,6 +176,13 @@ async function syncVideo({ force = false } = {}) {
   }
 
   if (!ctx || !ctx.videoId) {
+    // Left the watch page — drop the previous video's results too.
+    if (state.videoId) {
+      stopScan({ abort: true });
+      stopLive();
+      state.videoId = '';
+      resetAll();
+    }
     setVideoHeader('No video on this page', '', 'open a youtube.com/watch page');
     setControlsEnabled(false);
     return;
@@ -186,7 +194,7 @@ async function syncVideo({ force = false } = {}) {
   state.channel = ctx.channel || '';
 
   if (changed || force) {
-    stopScan(); // don't let a scan of the previous video keep writing cards
+    stopScan({ abort: true }); // kill any work still running for the old video
     stopLive();
     resetAll();
     setVideoHeader(state.title, state.channel, 'loading captions…');
@@ -542,7 +550,6 @@ async function scanVideo() {
   }
 
   state.scanning = true;
-  state.abort = new AbortController();
   $('scanBtn').textContent = '■ Stop';
   $('scanBtn').classList.remove('primary');
   $('progress').hidden = false;
@@ -569,13 +576,21 @@ async function scanVideo() {
     }
   });
   await Promise.all(workers);
-  stopScan();
+  stopScan({ abort: false }); // finished on its own — nothing to cancel
 }
 
-function stopScan() {
-  state.scanning = false;
+/** Cancel every fact-check still in flight and arm a fresh controller. */
+function abortInFlight() {
   if (state.abort) state.abort.abort();
-  state.abort = null;
+  state.abort = new AbortController();
+}
+
+function stopScan({ abort = true } = {}) {
+  const wasScanning = state.scanning;
+  state.scanning = false;
+  // Cancel requests still in flight, then arm a fresh controller so later
+  // checks (a single Check click, live follow) still work.
+  if (abort && wasScanning) abortInFlight();
   // Claims that never left the queue go back to being plain detected claims.
   for (const [id, card] of state.cards) {
     if (card.querySelector('.verdict.QUEUED')) {
@@ -702,6 +717,9 @@ async function checkClaim(claim) {
   if (state.queued.has(claim.id)) return;
   state.queued.add(claim.id);
 
+  if (!state.abort) state.abort = new AbortController();
+  const gen = state.generation; // the video this check belongs to
+  const signal = state.abort.signal;
   const card = addCard(claim);
   setCardStatus(card, 'CHECKING');
 
@@ -714,12 +732,14 @@ async function checkClaim(claim) {
         mode: state.settings.mode,
         context: { title: state.title, channel: state.channel }
       }),
-      signal: state.abort ? state.abort.signal : undefined
+      signal
     });
     const data = await res.json();
+    if (gen !== state.generation) return; // video changed — drop the stale reply
     if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
     renderResult(card, claim, data);
   } catch (e) {
+    if (gen !== state.generation) return;
     if (e.name === 'AbortError') {
       state.queued.delete(claim.id);
       setCardStatus(card, 'NEW');
@@ -862,39 +882,53 @@ function renderResult(card, claim, data) {
   card.querySelector('.explain').textContent = data.explanation || '';
   card.querySelector('.stamp').addEventListener('click', () => seekTo(claim.start));
 
-  const sources = card.querySelector('.sources');
-  if (data.has_level0) {
-    const badge = document.createElement('div');
-    badge.className = 'top-trust-badge';
-    badge.textContent = 'Level 0 authority citation (.edu / .gov / science)';
-    sources.appendChild(badge);
+  // A rule from SOURCE_TRUST.md fired (verdict withheld / weak sourcing).
+  if (data.trust_note) {
+    const note = document.createElement('div');
+    note.className = 'trust-note';
+    note.textContent = '⚠ ' + data.trust_note;
+    card.querySelector('.explain').after(note);
   }
+
+  const sources = card.querySelector('.sources');
   (data.sources || [])
     .filter((s) => s && s.url)
     .slice(0, 5)
-    .forEach((s) => {
-      const level = s.level !== undefined && s.level !== null ? s.level : 2;
-      const wrap = document.createElement('div');
-      wrap.className = `source-item level-${level}`;
-      const pill = document.createElement('span');
-      pill.className = `source-pill level-${level}`;
-      pill.textContent = s.badge || `L${level}`;
-      const a = document.createElement('a');
-      a.href = s.url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.textContent = s.title || s.url;
-      a.title = s.url;
-      wrap.appendChild(pill);
-      wrap.appendChild(a);
-      if (s.snippet) {
-        const fact = document.createElement('div');
-        fact.className = 'source-fact';
-        fact.textContent = s.snippet;
-        wrap.appendChild(fact);
-      }
-      sources.appendChild(wrap);
-    });
+    .forEach((s) => sources.appendChild(sourceRow(s)));
+}
+
+const LEVEL_NAMES = {
+  0: 'Institutional / peer-reviewed',
+  1: 'Major journalism & wire services',
+  2: 'Secondary / industry media',
+  3: 'User-generated / opinion',
+  4: 'High-bias / low-reliability'
+};
+
+/** One citation: trust-level badge, then the link. */
+function sourceRow(s) {
+  const row = document.createElement('div');
+  row.className = 'source';
+
+  const hasLevel = typeof s.level === 'number' && s.level >= 0 && s.level <= 4;
+  const badge = document.createElement('span');
+  badge.className = hasLevel ? `lvl lvl${s.level}` : 'lvl lvl2 unrated';
+  badge.textContent = hasLevel ? `L${s.level}` : 'L?';
+  badge.title = hasLevel
+    ? `Trust Level ${s.level} — ${s.level_name || LEVEL_NAMES[s.level]}` +
+      (s.rated === false ? '\n(domain not in the trust list — default)' : '')
+    : 'Unclassified source';
+  if (s.rated === false) badge.classList.add('unrated');
+
+  const a = document.createElement('a');
+  a.href = s.url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = s.title || s.url;
+  a.title = s.url;
+
+  row.append(badge, a);
+  return row;
 }
 
 function renderError(card, claim, message) {
@@ -994,8 +1028,10 @@ function resetResults() {
   renderClaimList();
 }
 
-/** Full reset — used when the video changes. */
+/** Full reset — wipes every trace of the previous video. */
 function resetAll() {
+  state.generation++; // anything still in flight now belongs to a dead video
+  abortInFlight();
   state.transcript = null;
   state.claims = [];
   state.claimById.clear();
@@ -1009,8 +1045,13 @@ function resetAll() {
   $('nowBox').hidden = true;
   $('transcript').textContent = '';
   $('lineCount').textContent = '';
+  $('transcriptState').title = '';
+  $('progress').hidden = true;
+  $('progressFill').style.width = '0';
   clearCards();
   resetResults();
+  $('cards').scrollTop = 0;
+  $('transcript').scrollTop = 0;
 }
 
 function showTab(name) {

@@ -29,34 +29,6 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-
-
-def _load_env():
-    """Load API key from local .env or the sibling you.com/.env."""
-    candidates = (
-        os.path.join(HERE, ".env"),
-        os.path.join(HERE, "..", "..", "you.com", ".env"),
-    )
-    for env_path in candidates:
-        if not os.path.exists(env_path):
-            continue
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    key, val = line.split("=", 1)
-                    key, val = key.strip(), val.strip().strip("'\"")
-                    if key and key not in os.environ:
-                        os.environ[key] = val
-        except OSError as e:
-            sys.stderr.write(f"  Warning: could not read {env_path}: {e}\n")
-        break
-
-
-_load_env()
 API_KEY = os.environ.get("YDC_API_KEY", "").strip()
 PORT = int(os.environ.get("PORT", "8765"))
 
@@ -75,12 +47,18 @@ FACTCHECK_PROMPT = (
     "You are a fact checker for claims spoken in an online video. Fact-check "
     "the statement below. It comes from an auto-generated transcript, so it may "
     "be missing punctuation or contain small transcription errors — judge the "
-    "substance, not the wording. Base the verdict only on reliable, trustworthy, "
-    "widely cited sources (.gov, .edu, major news wires, scientific orgs). Ignore "
-    "memes, GIFs, social posts, blogs, tabloids, and tangential or unrelated pages. "
-    "Use UNVERIFIED when the statement is opinion, prediction, or not checkable.\n\n"
+    "substance, not the wording. Base the verdict only on reliable sources. Use "
+    "UNVERIFIED when the statement is opinion, prediction, or not checkable.\n\n"
+    "Rank your evidence using this trust hierarchy:\n"
+    "  Level 0 (.edu, .gov, peer-reviewed science, WHO/CDC/NASA) — absolute truth\n"
+    "  Level 1 (Reuters, AP, BBC, WSJ, Pew, World Bank) — high trust\n"
+    "  Level 2 (industry and tech media, corporate newsrooms) — moderate trust\n"
+    "  Level 3/4 (social media, blogs, tabloids, conspiracy sites) — do not weight highly\n"
+    "A Level 0 source that directly settles a quantitative claim overrides lower "
+    "levels. Never rest a TRUE or FALSE verdict on Level 3/4 sources alone.\n\n"
     "Answer in exactly two lines and nothing else:\n"
-    "Line 1: 'VERDICT: X' where X is one of TRUE, FALSE, MISLEADING, UNVERIFIED.\n"
+    "Line 1: 'VERDICT: X (Trust Level: N)' where X is one of TRUE, FALSE, "
+    "MISLEADING, UNVERIFIED and N is 0-4 for the best evidence you actually used.\n"
     "Line 2: one plain-English sentence of at most 30 words explaining why.\n\n"
     "Formatting rules for line 2, follow them strictly:\n"
     "- Plain prose only. No markdown, no headings, no '#' characters, no bullet "
@@ -103,162 +81,125 @@ EXTRACT_PROMPT = (
     "\n\nVideo title: {title}\n\nTranscript:\n{transcript}"
 )
 
+# --------------------------------------------------- source trust classification
+# See SOURCE_TRUST.md. Short, editable starting lists — not a complete registry.
+
+LEVEL_NAMES = {
+    0: "Institutional / peer-reviewed",
+    1: "Major journalism & wire services",
+    2: "Secondary / industry media",
+    3: "User-generated / opinion",
+    4: "High-bias / low-reliability",
+}
+
+# Anything unmatched lands here, flagged as unrated so a default is never
+# mistaken for a vetted classification.
+DEFAULT_LEVEL = 2
+
+TRUST_TLDS = {
+    ".gov": 0, ".edu": 0, ".mil": 0, ".int": 0,
+    ".gov.uk": 0, ".ac.uk": 0, ".edu.au": 0, ".ac.jp": 0, ".gov.au": 0,
+}
+
+TRUST_DOMAINS = {
+    # Level 0 — institutional, peer-reviewed, primary
+    "pubmed.ncbi.nlm.nih.gov": 0, "ncbi.nlm.nih.gov": 0, "nature.com": 0,
+    "science.org": 0, "sciencedirect.com": 0, "arxiv.org": 0, "jstor.org": 0,
+    "ieee.org": 0, "ieeexplore.ieee.org": 0, "thelancet.com": 0, "nejm.org": 0,
+    "bmj.com": 0, "cell.com": 0, "pnas.org": 0, "springer.com": 0,
+    "who.int": 0, "un.org": 0, "europa.eu": 0, "esa.int": 0,
+    # Level 1 — wire services, major outlets, statistical repositories
+    "reuters.com": 1, "apnews.com": 1, "ap.org": 1, "afp.com": 1,
+    "bbc.com": 1, "bbc.co.uk": 1, "wsj.com": 1, "ft.com": 1,
+    "economist.com": 1, "npr.org": 1, "pbs.org": 1, "bloomberg.com": 1,
+    "nytimes.com": 1, "washingtonpost.com": 1, "theguardian.com": 1,
+    "worldbank.org": 1, "oecd.org": 1, "imf.org": 1, "pewresearch.org": 1,
+    "ourworldindata.org": 1, "britannica.com": 1,
+    # Level 2 — secondary, industry, corporate newsrooms
+    "techcrunch.com": 2, "wired.com": 2, "cnbc.com": 2, "forbes.com": 2,
+    "theverge.com": 2, "arstechnica.com": 2, "engadget.com": 2,
+    "businessinsider.com": 2, "espn.com": 2, "theathletic.com": 2,
+    "rollingstone.com": 2, "cnn.com": 2, "nbcnews.com": 2, "cbsnews.com": 2,
+    "time.com": 2, "newsweek.com": 2, "snopes.com": 2, "politifact.com": 2,
+    "factcheck.org": 2, "apple.com": 2, "blog.google": 2, "microsoft.com": 2,
+    # Level 3 — user-generated, self-published, social
+    "reddit.com": 3, "medium.com": 3, "substack.com": 3, "quora.com": 3,
+    "x.com": 3, "twitter.com": 3, "facebook.com": 3, "instagram.com": 3,
+    "tiktok.com": 3, "linkedin.com": 3, "youtube.com": 3, "wikipedia.org": 3,
+    "blogspot.com": 3, "wordpress.com": 3, "tumblr.com": 3, "stackexchange.com": 3,
+    # Level 4 — tabloid, conspiracy, state propaganda, clickbait
+    "dailymail.co.uk": 4, "nationalenquirer.com": 4, "thesun.co.uk": 4,
+    "mirror.co.uk": 4, "infowars.com": 4, "naturalnews.com": 4,
+    "beforeitsnews.com": 4, "thegatewaypundit.com": 4, "newspunch.com": 4,
+    "rt.com": 4, "sputniknews.com": 4, "presstv.ir": 4,
+}
+
+
+def classify_source(url: str):
+    """Map a citation URL to a trust level. Returns (level, rated)."""
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower().strip(".")
+    except ValueError:
+        return DEFAULT_LEVEL, False
+    if not host:
+        return DEFAULT_LEVEL, False
+    if host.startswith("www."):
+        host = host[4:]
+
+    # Explicit domains win over TLD rules (e.g. dailymail.co.uk before .uk).
+    for domain, level in TRUST_DOMAINS.items():
+        if host == domain or host.endswith("." + domain):
+            return level, True
+    for tld, level in TRUST_TLDS.items():
+        if host.endswith(tld):
+            return level, True
+    return DEFAULT_LEVEL, False
+
+
+def rate_sources(sources: list) -> list:
+    """Attach a trust level to every source and order them best-first."""
+    rated = []
+    for s in sources:
+        url = s.get("url", "")
+        if not url:
+            continue
+        level, known = classify_source(url)
+        rated.append(
+            {
+                "url": url,
+                "title": s.get("title") or url,
+                "level": level,
+                "level_name": LEVEL_NAMES.get(level, "Unclassified"),
+                "rated": known,
+            }
+        )
+    rated.sort(key=lambda s: s["level"])
+    return rated
+
+
+def _apply_trust_rules(verdict: str, sources: list):
+    """Enforce the SOURCE_TRUST.md rules that outrank the model's own call."""
+    levels = [s["level"] for s in sources]
+    if not levels:
+        return verdict, None
+
+    best = min(levels)
+    if verdict in ("TRUE", "FALSE"):
+        if best >= 4:
+            return "UNVERIFIED", "Only Level 4 (high-bias / low-reliability) sources — verdict withheld."
+        if best >= 3:
+            return "UNVERIFIED", "Only Level 3 (user-generated) sources — not a basis for a factual verdict."
+        if best == 1 and sum(1 for x in levels if x <= 1) < 2:
+            # Noted rather than downgraded — see the caveat in SOURCE_TRUST.md.
+            return verdict, "Single Level 1 citation, below the 2-source minimum."
+    return verdict, None
+
+
 _cache = {}
 _cache_lock = threading.Lock()
 # Calls actually billed this run, so the panel can show spend alongside balance.
 _usage = {"calls": 0, "cached": 0}
 
-LEVEL0_DOMAINS = (
-    "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov", "jstor.org", "arxiv.org",
-    "ieee.org", "nature.com", "science.org", "who.int", "cdc.gov", "nasa.gov",
-    "nih.gov", "noaa.gov", "fda.gov", "epa.gov",
-)
-LEVEL1_DOMAINS = (
-    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "wsj.com",
-    "bloomberg.com", "ft.com", "economist.com", "npr.org", "pbs.org",
-    "nytimes.com", "washingtonpost.com", "theguardian.com", "pewresearch.org",
-    "factcheck.org", "politifact.com", "snopes.com",
-)
-LEVEL3_DOMAINS = (
-    "reddit.com", "medium.com", "twitter.com", "x.com", "substack.com",
-    "quora.com", "tiktok.com", "youtube.com", "facebook.com", "instagram.com",
-)
-LEVEL4_DOMAINS = (
-    "dailymail.co.uk", "thesun.co.uk", "nationalenquirer.com",
-    "naturalnews.com", "infowars.com",
-)
-
-# Never surface these as citations — memes, GIFs, social junk, clickbait.
-BLOCKED_DOMAINS = (
-    "giphy.com", "tenor.com", "imgur.com", "gfycat.com", "reddit.com",
-    "knowyourmeme.com", "memedroid.com", "9gag.com", "buzzfeed.com",
-    "boredpanda.com", "tumblr.com", "pinterest.com", "tiktok.com",
-    "instagram.com", "facebook.com", "twitter.com", "x.com", "youtube.com",
-    "youtu.be", "medium.com", "quora.com", "substack.com", "patreon.com",
-)
-_BLOCKED_URL = re.compile(
-    r"(?:^|/)(?:gif|gifs|meme|memes|funny|viral)(?:/|$)|"
-    r"\.(?:gif|webm)(?:\?|$)|giphy|tenor\.com",
-    re.I,
-)
-
-
-def _host(url: str) -> str:
-    try:
-        h = urllib.parse.urlparse(url).hostname or ""
-    except ValueError:
-        return ""
-    return h.lower().removeprefix("www.")
-
-
-def _matches(host: str, domains) -> bool:
-    return any(host == d or host.endswith("." + d) or d in host for d in domains)
-
-
-def _classify_source(url: str) -> dict:
-    """SoT Level 0–4 trust classification (shared with LiveCheck)."""
-    host = _host(url)
-    path = ""
-    try:
-        path = (urllib.parse.urlparse(url).path or "").lower()
-    except ValueError:
-        pass
-    is_file = any(path.endswith(ext) for ext in (".pdf", ".doc", ".docx", ".csv", ".xls", ".xlsx"))
-    is_edu = host.endswith(".edu") or ".edu." in host
-    is_gov = host.endswith(".gov") or ".gov." in host or host.endswith(".mil")
-    is_int = host.endswith(".int")
-
-    if is_edu or is_gov or is_int or is_file or _matches(host, LEVEL0_DOMAINS):
-        if is_file:
-            badge, label = "L0 · File", "Level 0: Primary File"
-        elif is_edu:
-            badge, label = "L0 · .edu", "Level 0: .edu Academic"
-        elif is_gov:
-            badge, label = "L0 · .gov", "Level 0: .gov Institutional"
-        elif is_int:
-            badge, label = "L0 · .int", "Level 0: International Org"
-        else:
-            badge, label = "L0 · Science", "Level 0: Academic & Scientific"
-        return {"level": 0, "badge": badge, "label": label, "trusted": True}
-
-    if _matches(host, LEVEL1_DOMAINS):
-        return {"level": 1, "badge": "L1 · Wire / News", "label": "Level 1: Major News", "trusted": True}
-    if _matches(host, LEVEL4_DOMAINS):
-        return {"level": 4, "badge": "L4 · Low Trust", "label": "Level 4: Low Reliability", "trusted": False}
-    if _matches(host, LEVEL3_DOMAINS):
-        return {"level": 3, "badge": "L3 · Social", "label": "Level 3: Social / UGC", "trusted": False}
-    return {"level": 2, "badge": "L2 · Media", "label": "Level 2: Secondary Media", "trusted": False}
-
-
-def _best_snippet(snippets) -> str:
-    if not snippets:
-        return ""
-    if isinstance(snippets, str):
-        snippets = [snippets]
-    texts = [" ".join(str(s).split()).strip() for s in snippets if str(s).strip()]
-    if not texts:
-        return ""
-
-    def score(t: str) -> int:
-        s = 0
-        if re.search(r"\d+(\.\d+)?\s*%", t):
-            s += 3
-        if re.search(r"\d", t):
-            s += 2
-        if len(t) > 40:
-            s += 1
-        return s
-
-    texts.sort(key=score, reverse=True)
-    best = texts[0]
-    return best[:217] + "..." if len(best) > 220 else best
-
-
-def _process_sources(raw_sources: list) -> list:
-    """Keep only trustworthy sources; drop memes/GIFs/social/low-trust junk."""
-    seen, candidates = set(), []
-    for s in raw_sources or []:
-        if isinstance(s, str):
-            url, title, snippet = s, s, ""
-        else:
-            url = (s.get("url") or "").strip()
-            title = (s.get("title") or "").strip() or url
-            snips = s.get("snippets") or s.get("snippet") or []
-            if not snips and s.get("description"):
-                snips = [s["description"]]
-            snippet = _best_snippet(snips) if not isinstance(snips, str) else _best_snippet([snips])
-            if isinstance(s.get("snippet"), str) and not snippet:
-                snippet = s.get("snippet") or ""
-        if not url or not url.startswith("http") or url in seen:
-            continue
-        host = _host(url)
-        if _matches(host, BLOCKED_DOMAINS) or _matches(host, LEVEL3_DOMAINS) or _matches(host, LEVEL4_DOMAINS):
-            continue
-        if _BLOCKED_URL.search(url) or _BLOCKED_URL.search(title):
-            continue
-        seen.add(url)
-        cls = _classify_source(url)
-        # Skip low-trust leftovers that weren't in the blocklists.
-        if cls["level"] >= 3:
-            continue
-        candidates.append(
-            {
-                "url": url,
-                "title": title,
-                "snippet": snippet,
-                "level": cls["level"],
-                "badge": cls["badge"],
-                "label": cls["label"],
-                "trusted": cls["trusted"],
-            }
-        )
-
-    candidates.sort(key=lambda x: (x["level"], 0 if x.get("snippet") else 1))
-    # Prefer Level 0–1; only fill with Level 2 media if we lack high-trust hits.
-    top = [c for c in candidates if c["level"] <= 1]
-    if len(top) < 2:
-        top = top + [c for c in candidates if c["level"] == 2]
-    return top[:5]
 
 # --------------------------------------------------------------- You.com calls
 
@@ -285,15 +226,21 @@ def call_research(claim: str, context: str = "") -> dict:
     data = _research(FACTCHECK_PROMPT.format(claim=claim, context=context))
     output = data.get("output", {}) or {}
     content = output.get("content", "") or ""
-    sources = _process_sources(output.get("sources", []) or [])
-    verdict, explanation = _parse_verdict(content)
+    raw_sources = output.get("sources", []) or []
+    verdict, explanation, model_level = _parse_verdict(content)
+    sources = rate_sources(
+        [{"url": s.get("url", ""), "title": s.get("title", "")} for s in raw_sources]
+    )[:5]
+    verdict, trust_note = _apply_trust_rules(verdict, sources)
     return {
         "mode": "research",
         "verdict": verdict,
         "explanation": explanation,
         "content": content,
         "sources": sources,
-        "has_level0": any(s.get("level") == 0 for s in sources),
+        "trust_note": trust_note,
+        "best_level": sources[0]["level"] if sources else None,
+        "model_trust_level": model_level,
     }
 
 
@@ -342,15 +289,18 @@ def call_mcp(claim: str, context: str = "") -> dict:
     if result.get("isError"):
         raise RuntimeError(content or "MCP tool returned an error")
 
-    verdict, explanation = _parse_verdict(content)
-    sources = _process_sources(_sources_from_markdown(content))
+    verdict, explanation, model_level = _parse_verdict(content)
+    sources = rate_sources(_sources_from_markdown(content))[:5]
+    verdict, trust_note = _apply_trust_rules(verdict, sources)
     return {
         "mode": "mcp",
         "verdict": verdict,
         "explanation": explanation,
         "content": content,
         "sources": sources,
-        "has_level0": any(s.get("level") == 0 for s in sources),
+        "trust_note": trust_note,
+        "best_level": sources[0]["level"] if sources else None,
+        "model_trust_level": model_level,
     }
 
 
@@ -447,8 +397,13 @@ def _clean_explanation(raw: str, limit: int = 300) -> str:
 
 
 def _parse_verdict(content: str):
-    """Pull the leading 'VERDICT: X' line out of the model's answer."""
+    """Pull 'VERDICT: X (Trust Level: N)' out of the model's answer.
+
+    Returns (verdict, explanation, model_trust_level). The trust level is what
+    the model claims it used; the server classifies the citations itself.
+    """
     verdict = "UNVERIFIED"
+    model_level = None
     explanation = content.strip()
     for line in content.splitlines():
         line = line.strip()
@@ -461,11 +416,14 @@ def _parse_verdict(content: str):
                 if cand in upper:
                     verdict = cand
                     break
+            m = re.search(r"TRUST\s*LEVEL\s*[:=]?\s*\[?\s*([0-4])", upper)
+            if m:
+                model_level = int(m.group(1))
             # Everything after the verdict line becomes the explanation.
             rest = content.split(line, 1)[-1].strip()
             explanation = rest or explanation
             break
-    return verdict, _clean_explanation(explanation)
+    return verdict, _clean_explanation(explanation), model_level
 
 
 def _parse_jsonrpc(raw: str) -> dict:
