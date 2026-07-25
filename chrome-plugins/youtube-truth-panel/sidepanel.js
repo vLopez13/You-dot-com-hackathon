@@ -328,7 +328,7 @@ function renderTranscript(segments) {
     txt.className = 'txt';
     txt.textContent = line.text;
 
-    el.append(t, txt);
+    el.append(txt, t);
     el.addEventListener('click', () => seekTo(line.start));
     frag.appendChild(el);
     state.lineEls.push(el);
@@ -766,12 +766,16 @@ function clearCards() {
   state.cards.clear();
 }
 
-/** Every detected claim gets a card up front; verdicts fill in later. */
 function renderClaimList() {
   clearCards();
-  $('claimCount').textContent = state.claims.length ? String(state.claims.length) : '';
+  
+  const limit = claimLimit();
+  let displayClaims = [...state.claims].sort((a, b) => b.score - a.score || a.start - b.start).slice(0, limit);
+  displayClaims.sort((a, b) => a.start - b.start);
 
-  if (!state.claims.length) {
+  $('claimCount').textContent = displayClaims.length ? String(displayClaims.length) : '';
+
+  if (!displayClaims.length) {
     showNotice(
       state.transcript
         ? 'No check-worthy claims found in this video — it may be mostly opinion, chat or music.'
@@ -780,7 +784,7 @@ function renderClaimList() {
     return;
   }
   hideNotice();
-  state.claims.forEach((claim) => addCard(claim));
+  displayClaims.forEach((claim) => addCard(claim));
 }
 
 function addCard(claim) {
@@ -1102,7 +1106,12 @@ $('modeToggle').addEventListener('click', (e) => {
   [...$('modeToggle').children].forEach((c) => c.classList.toggle('active', c === b));
 });
 
-$('maxClaims').addEventListener('change', (e) => saveSettings({ maxClaims: e.target.value }));
+$('maxClaims').addEventListener('change', (e) => {
+  saveSettings({ maxClaims: e.target.value });
+  if (state.transcript && !state.scanning && !state.live) {
+    renderClaimList();
+  }
+});
 $('smartExtract').addEventListener('change', (e) => saveSettings({ smartExtract: e.target.checked }));
 $('endpoint').addEventListener('change', (e) => {
   saveSettings({ endpoint: e.target.value.trim() || DEFAULTS.endpoint });

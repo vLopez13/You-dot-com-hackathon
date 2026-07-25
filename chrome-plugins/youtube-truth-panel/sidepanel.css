@@ -148,15 +148,19 @@ select {
 .transcript[hidden] { display: none; }
 .line {
   display: flex; gap: 8px; padding: 5px 7px; border-radius: 7px;
-  cursor: pointer; border-left: 2px solid transparent;
+  cursor: pointer; border-left: 2px solid transparent; justify-content: space-between; align-items: flex-start;
 }
 .line:hover { background: var(--panel-2); }
-.line .t { color: var(--accent); font-size: 10.5px; font-variant-numeric: tabular-nums; flex: none; opacity: .75; padding-top: 1px; }
-.line .txt { color: #c3cad9; font-size: 12px; line-height: 1.45; }
+.line .txt { color: #c3cad9; font-size: 12px; line-height: 1.45; flex: 1; }
+.line .t { 
+  color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; flex: none; 
+  padding: 2px 6px; background: rgba(0,0,0,0.15); border-radius: 4px; font-weight: 600; opacity: 0.6;
+}
 .line.claim { background: rgba(108,140,255,.06); border-left-color: rgba(108,140,255,.5); }
 .line.claim .txt { color: var(--text); }
-.line.active { background: rgba(108,140,255,.2); }
+.line.active { background: rgba(108,140,255,.12); border-left-color: var(--accent); }
 .line.active .txt { color: #fff; }
+.line.active .t { color: var(--accent); opacity: 1; background: rgba(108,140,255,0.15); }
 .line.TRUE { border-left-color: var(--true); }
 .line.FALSE { border-left-color: var(--false); }
 .line.MISLEADING { border-left-color: var(--misleading); }

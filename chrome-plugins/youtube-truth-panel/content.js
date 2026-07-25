@@ -16,7 +16,64 @@
 
   const TIME_TICK_MS = 1000;
   let timeTimer = null;
+  let timeUpdatesActive = false;
+  let timeOverlay = null;
   let lastHref = location.href;
+
+  // ---------- time overlay helpers ----------
+
+  function ensureTimeOverlay() {
+    if (timeOverlay && timeOverlay.parentNode) return;
+    const player = document.querySelector('.html5-video-player') || document.querySelector('#movie_player');
+    if (!player) return;
+
+    timeOverlay = document.createElement('div');
+    timeOverlay.className = 'yt-truth-panel-time-overlay';
+    Object.assign(timeOverlay.style, {
+      position: 'absolute',
+      top: '20px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      zIndex: '9999',
+      background: 'rgba(20,24,33,0.88)',
+      color: '#e8ecf4',
+      fontSize: '13px',
+      fontWeight: '600',
+      padding: '6px 14px',
+      borderRadius: '8px',
+      border: '1px solid #262d3d',
+      display: 'none',
+      fontVariantNumeric: 'tabular-nums',
+      letterSpacing: '0.02em',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    });
+    player.appendChild(timeOverlay);
+  }
+
+  function formatTime(sec) {
+    const s = Math.max(0, Math.floor(sec || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    const mm = h ? String(m).padStart(2, '0') : String(m);
+    return (h ? `${h}:` : '') + `${mm}:${String(r).padStart(2, '0')}`;
+  }
+
+  function updateTimeOverlay(currentTime, duration) {
+    if (!timeOverlay) return;
+    if (!timeUpdatesActive) {
+      timeOverlay.style.display = 'none';
+      return;
+    }
+    timeOverlay.style.display = 'block';
+    // If it's a livestream, duration might be very large or 0.
+    const isLive = duration === 0 || duration > 360000;
+    if (isLive) {
+      timeOverlay.textContent = `● LIVE · ${formatTime(currentTime)}`;
+    } else {
+      timeOverlay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+    }
+  }
 
   // ---------- page helpers ----------
 
@@ -426,20 +483,29 @@
 
   function startTimeUpdates() {
     stopTimeUpdates();
+    timeUpdatesActive = true;
+    ensureTimeOverlay();
     timeTimer = setInterval(() => {
       const v = videoEl();
       if (!v) return;
+      const cTime = v.currentTime;
+      const dur = isFinite(v.duration) ? v.duration : 0;
+      
+      updateTimeOverlay(cTime, dur);
+      
       emit({
         type: 'time-update',
         videoId: videoIdFromUrl(),
-        time: v.currentTime,
+        time: cTime,
         paused: v.paused,
-        duration: isFinite(v.duration) ? v.duration : 0
+        duration: dur
       });
     }, TIME_TICK_MS);
   }
 
   function stopTimeUpdates() {
+    timeUpdatesActive = false;
+    if (timeOverlay) timeOverlay.style.display = 'none';
     if (timeTimer) clearInterval(timeTimer);
     timeTimer = null;
   }
