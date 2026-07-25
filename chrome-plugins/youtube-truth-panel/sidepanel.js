@@ -35,6 +35,7 @@ const state = {
   live: false,
   generation: 0, // bumped per video, so stale replies can be dropped
   lastTime: 0,
+  duration: 0,
   revealedClaims: -1, // how much of the video the live window has reached
   revealedLines: -1,
   scanning: false,
@@ -160,6 +161,7 @@ async function syncVideo({ force = false } = {}) {
     state.tabId = null;
     setVideoHeader('No YouTube video detected', '', 'open a youtube.com/watch page');
     setControlsEnabled(false);
+    updateTabTime(0, 0);
     return;
   }
   state.tabId = tab.id;
@@ -185,6 +187,7 @@ async function syncVideo({ force = false } = {}) {
     }
     setVideoHeader('No video on this page', '', 'open a youtube.com/watch page');
     setControlsEnabled(false);
+    updateTabTime(0, 0);
     return;
   }
 
@@ -201,6 +204,12 @@ async function syncVideo({ force = false } = {}) {
     setControlsEnabled(true);
     loadTranscript().catch(() => {});
   }
+
+  state.lastTime = Number(ctx.currentTime) || 0;
+  state.duration = Number(ctx.duration) || 0;
+  updateTabTime(state.lastTime, state.duration);
+  // Track playhead for every visit so the Transcript tab clock stays live.
+  sendToTab({ type: 'start-time-updates' }).catch(() => {});
 }
 
 function setVideoHeader(title, channel, transcriptState) {
@@ -696,8 +705,10 @@ function scrollIntoViewSoftly(el) {
   setTimeout(() => (state.autoScrolling = false), 900);
 }
 
-function onTimeUpdate(time) {
+function onTimeUpdate(time, duration) {
   state.lastTime = time;
+  if (duration != null && isFinite(duration)) state.duration = duration;
+  updateTabTime(time, state.duration);
   updateNow(time);
   highlightLine(time);
   if (!state.live) return;
@@ -709,6 +720,21 @@ function onTimeUpdate(time) {
     (c) => !state.queued.has(c.id) && c.score >= minScore && c.start <= time && c.start >= time - LIVE_WINDOW
   );
   for (const claim of due.slice(0, auto ? 3 : 2)) checkClaim(claim);
+}
+
+/** Current / total playback clock on the Transcript tab row (far right). */
+function updateTabTime(time, duration) {
+  const el = $('tabTime');
+  if (!el) return;
+  const t = Number(time) || 0;
+  const d = Number(duration) || 0;
+  if (!state.videoId) {
+    el.textContent = '';
+    return;
+  }
+  // Livestreams often report 0 or a huge duration.
+  const isLive = d === 0 || d > 360000;
+  el.textContent = isLive ? `● LIVE · ${fmtTime(t)}` : `${fmtTime(t)} / ${fmtTime(d)}`;
 }
 
 // ---------------------------------------------------------------- fact check
@@ -758,6 +784,51 @@ function fmtTime(sec) {
   const r = s % 60;
   const mm = h ? String(m).padStart(2, '0') : String(m);
   return (h ? `${h}:` : '') + `${mm}:${String(r).padStart(2, '0')}`;
+}
+
+/** Plain factual prose for claim cards — no markdown or "according to source". */
+function cleanExplanation(raw) {
+  let text = String(raw || '');
+  if (!text) return '';
+
+  // Drop trailing Sources / References sections the model sometimes appends.
+  text = text.replace(
+    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:sources?|references?|citations?|key excerpts?|url)\s*:?\s*(?:\*\*)?\s*[\s\S]*$/i,
+    ''
+  );
+
+  // Citation markers and markdown links → label only.
+  text = text.replace(/\s*\[\[[^\]]*\]\]/g, '');
+  text = text.replace(/\s*\[\^?\d+(?:\s*,\s*\d+)*\]/g, '');
+  text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+
+  // Headings, bullets, emphasis.
+  text = text.replace(/^\s{0,3}#{1,6}\s*/gm, '');
+  text = text.replace(/^\s*[-*•+]\s+/gm, '');
+  text = text.replace(/^\s*>\s?/gm, '');
+  text = text.replace(/\*\*|__|`|\*/g, '');
+
+  // Delimiters the user never wants in the card: ## '' { } [ ] \ / * & #
+  // Keep mid-word / and & (and/or, R&D).
+  text = text.replace(/[#*`{}[\]\\]+|'{2,}|"{2,}|(?<!\w)[/&](?!\w)/g, ' ');
+
+  // Strip "according to source(s)" and similar lead-ins / mid-sentence fillers.
+  text = text.replace(
+    /^\s*(?:explanation|reasoning|analysis|verdict|answer|summary)\s*[:.\-–—]?\s*/i,
+    ''
+  );
+  text = text.replace(
+    /^\s*(?:according\s+to\s+(?:the\s+)?(?:sources?|source|reports?|data|evidence|available\s+evidence|reliable\s+sources?)|based\s+on\s+(?:the\s+)?(?:sources?|evidence|available\s+evidence)|as\s+per\s+(?:the\s+)?sources?|the\s+claim\s+is\s+(?:true|false|misleading|unverified)|this\s+(?:claim|statement)\s+is\s+(?:true|false|misleading|unverified))\s*[,:\-–—]?\s*/i,
+    ''
+  );
+  text = text.replace(
+    /\baccording\s+to\s+(?:the\s+)?(?:sources?|source|reports?|data)\b[,:]?\s*/gi,
+    ''
+  );
+
+  text = text.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '');
+  text = text.replace(/\s+/g, ' ').trim();
+  return text;
 }
 
 /** Remove result cards without touching the notice element living alongside them. */
@@ -859,10 +930,11 @@ function renderResult(card, claim, data) {
   updateTrust();
 
   const line = state.claimLine.get(claim.id);
+  const explanation = cleanExplanation(data.explanation || '');
   if (line) {
     line.classList.remove('TRUE', 'FALSE', 'MISLEADING', 'UNVERIFIED');
     line.classList.add(verdict);
-    line.title = `${verdict} — ${data.explanation || ''}`;
+    line.title = explanation ? `${verdict} — ${explanation}` : verdict;
   }
 
   const tag = data.cached
@@ -883,7 +955,7 @@ function renderResult(card, claim, data) {
     <div class="sources"></div>`;
   card.querySelector('.stamp').textContent = fmtTime(claim.start);
   card.querySelector('.claim').textContent = claim.text;
-  card.querySelector('.explain').textContent = data.explanation || '';
+  card.querySelector('.explain').textContent = explanation;
   card.querySelector('.stamp').addEventListener('click', () => seekTo(claim.start));
 
   // A rule from SOURCE_TRUST.md fired (verdict withheld / weak sourcing).
@@ -1044,6 +1116,7 @@ function resetAll() {
   state.lineEls = [];
   state.activeLine = -1;
   state.lastTime = 0;
+  state.duration = 0;
   state.revealedClaims = -1;
   state.revealedLines = -1;
   $('nowBox').hidden = true;
@@ -1052,6 +1125,7 @@ function resetAll() {
   $('transcriptState').title = '';
   $('progress').hidden = true;
   $('progressFill').style.width = '0';
+  if ($('tabTime')) $('tabTime').textContent = '';
   clearCards();
   resetResults();
   $('cards').scrollTop = 0;
@@ -1060,7 +1134,9 @@ function resetAll() {
 
 function showTab(name) {
   state.tab = name;
-  [...$('tabs').children].forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  [...$('tabs').querySelectorAll('button')].forEach((b) =>
+    b.classList.toggle('active', b.dataset.tab === name)
+  );
   $('cards').hidden = name !== 'claims';
   $('transcript').hidden = name !== 'transcript';
 }
@@ -1124,7 +1200,9 @@ $('creditsPill').addEventListener('click', () => refreshBalance());
 
 chrome.runtime.onMessage.addListener((message) => {
   if (!message) return;
-  if (message.type === 'time-update' && message.videoId === state.videoId) onTimeUpdate(message.time);
+  if (message.type === 'time-update' && message.videoId === state.videoId) {
+    onTimeUpdate(message.time, message.duration);
+  }
   if (message.type === 'video-changed' || message.type === 'tab-updated') syncVideo();
 });
 

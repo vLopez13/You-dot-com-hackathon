@@ -67,7 +67,9 @@ FACTCHECK_PROMPT = (
     "- Do NOT list, name, link or describe your sources — they are displayed "
     "separately. Never write a 'Sources' section.\n"
     "- Lead with the substance (the correct fact or figure), not with phrases "
-    "like 'The claim is' or 'According to sources'.\n\n"
+    "like 'The claim is' or 'According to sources'.\n"
+    "- Never write 'according to source(s)' or name outlets in the explanation.\n"
+    "- Do not use these characters in the explanation: # * ` {{ }} [ ] \\ / &\n\n"
     "{context}"
     'Statement: "{claim}"'
 )
@@ -351,6 +353,18 @@ _SOURCE_SECTION = re.compile(
 )
 # The first per-source entry, e.g. "### 1. Apollo 11 | The Planetary Society"
 _SOURCE_ENTRY = re.compile(r"(?im)^\s*(?:#{1,6}\s+\d+\.|\*\*URL:\*\*|\*\*Key Excerpts?:\*\*|>\s)")
+# Lead-ins that bury the fact behind sourcing language.
+_ACCORDING_LEAD = re.compile(
+    r"(?i)^\s*(?:according\s+to\s+(?:the\s+)?(?:sources?|source|reports?|data|evidence|"
+    r"available\s+evidence|reliable\s+sources?)|based\s+on\s+(?:the\s+)?(?:sources?|evidence|"
+    r"available\s+evidence)|as\s+per\s+(?:the\s+)?sources?|"
+    r"the\s+claim\s+is\s+(?:true|false|misleading|unverified)|"
+    r"this\s+(?:claim|statement)\s+is\s+(?:true|false|misleading|unverified))"
+    r"\s*[,:\-–—]?\s*"
+)
+# Markdown / citation delimiters that should never reach the claim card.
+# Keep mid-word / and & (and/or, R&D); only strip them as decoration.
+_DELIMS = re.compile(r"[#*`{}[\]\\]+|'{2,}|\"{2,}|(?<!\w)[/&](?!\w)")
 
 
 def _clean_explanation(raw: str, limit: int = 300) -> str:
@@ -358,7 +372,7 @@ def _clean_explanation(raw: str, limit: int = 300) -> str:
 
     The Research API answers in markdown with citation markers and a trailing
     source dump. The panel renders sources itself, so strip all of that and
-    keep only the prose.
+    keep only the factual prose.
     """
     text = raw or ""
 
@@ -378,9 +392,31 @@ def _clean_explanation(raw: str, limit: int = 300) -> str:
     text = re.sub(r"(?m)^\s*[-*•+]\s+", "", text)
     text = re.sub(r"(?m)^\s*>\s?", "", text)
     text = text.replace("**", "").replace("__", "").replace("`", "").replace("*", "")
+
+    # 4. Strip leftover delimiter characters (##, [], {}, \, etc.).
+    text = _DELIMS.sub(" ", text)
+
+    # 5. Drop "according to sources" / "the claim is true" style lead-ins,
+    #    plus leftover heading labels like "Explanation:".
+    text = " ".join(text.split())
+    text = re.sub(
+        r"(?i)^\s*(?:explanation|reasoning|analysis|verdict|answer|summary)\s*[:.\-–—]?\s*",
+        "",
+        text,
+    )
+    text = _ACCORDING_LEAD.sub("", text)
+    # Also strip those phrases mid-sentence when the model buries them.
+    text = re.sub(
+        r"(?i)\baccording\s+to\s+(?:the\s+)?(?:sources?|source|reports?|data)\b[,:]?\s*",
+        "",
+        text,
+    )
+
+    # 6. Unwrap leftover quote wrappers around the whole sentence.
+    text = text.strip().strip("\"'“”‘’")
     text = " ".join(text.split())
 
-    # 4. Keep it to a couple of sentences, cut on a sentence boundary.
+    # 7. Keep it to a couple of sentences, cut on a sentence boundary.
     sentences = re.split(r"(?<=[.!?])\s+", text)
     out = ""
     for sentence in sentences[:2]:
